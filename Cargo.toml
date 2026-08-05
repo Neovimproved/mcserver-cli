@@ -1,0 +1,29 @@
+[package]
+name = "mcserver"
+version = "0.2.1"
+edition = "2024"
+description = "A command line interface which simplifies minecraft server management with zellij and mcrcon"
+license = "MIT"
+repository = "https://github.com/Neovimproved/mcserver-cli.git"
+
+[dependencies]
+clap = { version = "4.6.5", features = ["derive"] }
+dirs = "6.0.0"
+reqwest = { version = "0.13.4", features = ["blocking", "json"] }
+url = "2.5.8"
+serde = { version = "1.0.229", features = ["derive"] }
+shellexpand = "3.1.2"
+color-eyre = { version = "0.6.5" }
+thiserror = "2.0.19"
+serde_json = "1.0.151"
+kdl = "6.7.1"
+clap_complete = "4.6.8"
+
+[build-dependencies]
+toml = "1.1.4"
+color-eyre = "0.6.5"
+clap = { version = "4.6.5", features = ["derive"] }
+clap_complete = "4.6.8"
+
+[features]
+build-logging = []

@@ -1,0 +1,25 @@
+// Used for the default http header value (for sites that require them, such as the fabric api)
+contact "none"
+
+// The default arguments passed to the java command when the jar is run
+default_java_args {
+    "-Xms2G"
+    "-Xmx4G"
+}
+
+// Whether to use enable nogui when starting the server
+nogui #true
+
+// The directory where servers are stored and expected to be stored (local to home)
+servers_directory "~/Servers"
+
+// Aliases for your servers!
+aliases {
+    // The default alias is special, since it will be used when no server name is specified
+    /-default my-server
+}
+
+// Rcon configuration for each server
+rcon {
+    /-my-server server_address="localhost"
+}

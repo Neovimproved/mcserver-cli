@@ -1,0 +1,8 @@
+- [x] Add a more robust system for server restarting
+- [x] Add a nix build script
+- [x] Add some autocompletion
+- [x] Add "." support for default set
+- [x] Fix the ls command (currently it states the dirs of the servers directory, preventing nested servers from being listed)
+- [x] Add an alias system
+- [x] Switch to kdl files (toml bad)
+- [ ] Add alias command (edits the config automatically)

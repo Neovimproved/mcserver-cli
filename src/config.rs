@@ -1,0 +1,435 @@
+use std::{
+    cell::UnsafeCell,
+    collections::HashMap,
+    env::{self, VarError},
+    ffi::OsStr,
+    fmt::{self, Debug, Formatter},
+    fs, io,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    result,
+};
+
+use kdl::{KdlDocument, KdlNode};
+use shellexpand::LookupError;
+
+use crate::{
+    error::{Error, ParseConfigError, Result},
+    server,
+};
+
+const DEFAULT_CONFIG: &str = include_str!(concat!(env!("OUT_DIR"), "/generated_config.kdl"));
+
+const CONFIG_DIRECTORY_NAME: &str = "mcserver";
+const CONFIG_FILE_NAME: &str = "config.kdl";
+
+pub struct Password(pub String);
+
+impl AsRef<OsStr> for Password {
+    fn as_ref(&self) -> &OsStr {
+        OsStr::new(&self.0)
+    }
+}
+
+impl Debug for Password {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "(hidden)")
+    }
+}
+
+#[derive(Debug)]
+pub struct RconConfig {
+    pub server_address: Option<String>,
+    pub port: Option<u16>,
+    pub password: Option<Password>,
+}
+
+pub struct ServersDirectory {
+    raw_string: String,
+    expanded: UnsafeCell<Option<PathBuf>>,
+}
+
+impl Debug for ServersDirectory {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.expand() {
+            Ok(path) => write!(f, "{}", path.display()),
+            Err(_) => write!(f, "[failed to expand servers directory]"),
+        }
+    }
+}
+
+impl From<String> for ServersDirectory {
+    fn from(value: String) -> Self {
+        Self {
+            raw_string: value,
+            expanded: UnsafeCell::new(None),
+        }
+    }
+}
+
+impl From<&str> for ServersDirectory {
+    fn from(value: &str) -> Self {
+        Self::from(value.to_string())
+    }
+}
+
+impl ServersDirectory {
+    pub fn expand(&self) -> result::Result<&Path, LookupError<VarError>> {
+        unsafe {
+            if let Some(expanded) = &*(self.expanded.get()) {
+                return Ok(expanded);
+            }
+
+            let expanded_path = PathBuf::from(shellexpand::full(&self.raw_string)?.into_owned());
+            Ok((*self.expanded.get()).insert(expanded_path))
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Config {
+    pub contact: String,
+    pub default_java_args: Vec<String>,
+    pub nogui: bool,
+    pub servers_directory: ServersDirectory,
+    pub aliases: HashMap<String, String>,
+    pub rcon: HashMap<String, RconConfig>,
+}
+
+pub fn get_directory() -> Result<PathBuf> {
+    let config_dir = dirs::config_dir()
+        .ok_or(Error::UnresolvedConfigDirectory)?
+        .join(CONFIG_DIRECTORY_NAME);
+
+    Ok(config_dir)
+}
+
+pub fn edit_config_file(config_directory: &Path) -> Result<()> {
+    Command::new(env::var("EDITOR")?)
+        .arg(config_directory.join(CONFIG_FILE_NAME))
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .output()?;
+
+    Ok(())
+}
+
+fn parse_alias(node: &KdlNode) -> result::Result<(String, String), ParseConfigError> {
+    let reference = node
+        .get(0)
+        .ok_or(ParseConfigError::ExpectedArgument {
+            arg: 0,
+            purpose: "specifying the reference to an alias",
+        })?
+        .as_string()
+        .ok_or(ParseConfigError::InvalidType {
+            field: "alias",
+            expected_type: "string",
+        })?
+        .to_string();
+
+    Ok((node.name().to_string(), reference))
+}
+
+fn parse_number<T, E>(
+    node: &KdlNode,
+    f: impl Fn(i128) -> result::Result<T, E>,
+    name: &'static str,
+) -> result::Result<T, ParseConfigError> {
+    let value = node.get(0).ok_or(ParseConfigError::ExpectedArgument {
+        arg: 0,
+        purpose: name,
+    })?;
+
+    let integer = value.as_integer().ok_or(ParseConfigError::InvalidType {
+        field: name,
+        expected_type: "integer",
+    })?;
+
+    f(integer).map_err(|_| ParseConfigError::OutOfBounds(integer))
+}
+
+fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), ParseConfigError> {
+    let children = node
+        .children()
+        .ok_or(ParseConfigError::ExpectedChildren("rcon"))?;
+
+    let rcon_config = RconConfig {
+        server_address: children
+            .get("server_address")
+            .map(|node| {
+                node.get(0)
+                    .ok_or(ParseConfigError::ExpectedArgument {
+                        arg: 0,
+                        purpose: "server address",
+                    })?
+                    .as_string()
+                    .ok_or(ParseConfigError::InvalidType {
+                        field: "server_address",
+                        expected_type: "string",
+                    })
+            })
+            .transpose()?
+            .map(String::from),
+
+        port: children
+            .get("port")
+            .map(|node| parse_number(node, u16::try_from, "port"))
+            .transpose()?,
+
+        password: children
+            .get("password")
+            .map(|node| {
+                node.get(0)
+                    .ok_or(ParseConfigError::ExpectedArgument {
+                        arg: 0,
+                        purpose: "password",
+                    })?
+                    .as_string()
+                    .ok_or(ParseConfigError::InvalidType {
+                        field: "password",
+                        expected_type: "string",
+                    })
+            })
+            .transpose()?
+            .map(|value| Password(value.to_string())),
+    };
+
+    Ok((node.name().to_string(), rcon_config))
+}
+
+fn parse_config(document: &KdlDocument) -> Result<Config> {
+    let contact = document
+        .get("contact")
+        .map(|node| {
+            node.get(0)
+                .ok_or(ParseConfigError::ExpectedArgument {
+                    arg: 0,
+                    purpose: "the contact must be specified",
+                })?
+                .as_string()
+                .ok_or(ParseConfigError::InvalidType {
+                    field: "contact",
+                    expected_type: "string",
+                })
+        })
+        .transpose()?
+        .unwrap_or("none")
+        .to_string();
+
+    let default_java_args: Vec<String> = document
+        .get("default_java_args")
+        .map(|node| {
+            node.iter_children()
+                .map(|child_node| child_node.name().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let nogui = document
+        .get("nogui")
+        .map(|node| {
+            node.get(0)
+                .ok_or(ParseConfigError::ExpectedArgument {
+                    arg: 0,
+                    purpose: "specifying nogui",
+                })?
+                .as_bool()
+                .ok_or(ParseConfigError::InvalidType {
+                    field: "nogui",
+                    expected_type: "boolean",
+                })
+        })
+        .transpose()?
+        .unwrap_or(true);
+
+    let servers_directory = ServersDirectory::from(
+        document
+            .get("servers_directory")
+            .map(|node| {
+                node.get(0)
+                    .ok_or(ParseConfigError::ExpectedArgument {
+                        arg: 0,
+                        purpose: "servers directory must be specified",
+                    })?
+                    .as_string()
+                    .ok_or(ParseConfigError::InvalidType {
+                        field: "servers_directory",
+                        expected_type: "string",
+                    })
+            })
+            .transpose()?
+            .unwrap_or("~/Servers"),
+    );
+
+    let aliases: HashMap<String, String> = document
+        .get("aliases")
+        .map(|node| node.iter_children().map(parse_alias).collect())
+        .transpose()?
+        .unwrap_or_default();
+
+    let rcon: HashMap<String, RconConfig> = document
+        .get("rcon")
+        .map(|node| node.iter_children().map(parse_rcon_config).collect())
+        .transpose()?
+        .unwrap_or_default();
+
+    Ok(Config {
+        contact,
+        default_java_args,
+        nogui,
+        servers_directory,
+        aliases,
+        rcon,
+    })
+}
+
+pub fn write_document_to_config_file(
+    document: &KdlDocument,
+    config_directory: &Path,
+) -> io::Result<()> {
+    let config_file_path = config_directory.join(CONFIG_FILE_NAME);
+
+    fs::write(config_file_path, document.to_string())
+}
+
+pub fn load_or_create(config_directory: &Path) -> Result<(Config, KdlDocument)> {
+    let config_file_path = config_directory.join(CONFIG_FILE_NAME);
+
+    let document = match fs::read_to_string(&config_file_path) {
+        Ok(config_str) => KdlDocument::parse(&config_str),
+        Err(err) => {
+            if err.kind() == io::ErrorKind::NotFound {
+                fs::create_dir_all(config_directory)?;
+                fs::write(&config_file_path, DEFAULT_CONFIG)?;
+                KdlDocument::parse(DEFAULT_CONFIG)
+            } else {
+                return Err(Error::Io(err));
+            }
+        }
+    }?;
+
+    Ok((parse_config(&document)?, document))
+}
+
+pub fn add_alias(document: &mut KdlDocument, alias: String, server: String) -> Result<()> {
+    if alias.len() > server.len() {
+        println!("You are smart");
+    }
+
+    if let Some(aliases_node) = document.get_mut("aliases") {
+        aliases_node
+            .children_mut()
+            .as_mut()
+            .expect("Expected children")
+            .nodes_mut()
+            .push(KdlNode::parse(&format!("    {alias} {server}\n"))?);
+
+        println!("Alias {alias} added (references {server}");
+
+        return Ok(());
+    }
+
+    let nodes = document.nodes_mut();
+
+    let mut idx = 1;
+    let mut leading_newlines_needed = 0;
+    let mut trailing_newlines_needed = 0;
+
+    for node in nodes.iter() {
+        match node.name().value() {
+            "rcon" => {
+                if let Some(formatting) = node.format() {
+                    let leading_newlines = formatting.leading.matches('\n').count();
+                    let trailing_newlines = formatting.trailing.matches('\n').count();
+
+                    if leading_newlines < 2 {
+                        leading_newlines_needed = 2 - leading_newlines;
+                    }
+
+                    if trailing_newlines == 0 {
+                        trailing_newlines_needed = 1;
+                    }
+                }
+                break;
+            }
+            _ => {
+                idx += 1;
+            }
+        }
+    }
+
+    nodes.insert(
+        idx,
+        KdlNode::parse(&format!(
+            "{}aliases {{\n    {alias} {server}\n}}{}",
+            "\n".repeat(leading_newlines_needed),
+            "\n".repeat(trailing_newlines_needed)
+        ))?,
+    );
+
+    Ok(())
+}
+
+pub fn get_current_server_directory(servers_dir: &Path) -> Result<String> {
+    let mut server_path = env::current_dir()?;
+
+    loop {
+        if fs::exists(server_path.join(server::METADATA_DIRECTORY_NAME))? {
+            break;
+        }
+
+        server_path = server_path
+            .parent()
+            .ok_or(Error::InvalidServersDirectory)?
+            .to_path_buf();
+    }
+
+    let server = server_path
+        .strip_prefix(servers_dir)
+        .map_err(|_| Error::InvalidServersDirectory)?
+        .to_string_lossy()
+        .into_owned();
+
+    Ok(server)
+}
+
+pub fn server_or_current<S>(server: S, config: &Config) -> Result<String>
+where
+    S: Into<String> + for<'a> PartialEq<&'a str>,
+{
+    if server == "." {
+        get_current_server_directory(config.servers_directory.expand()?)
+    } else {
+        Ok(server.into())
+    }
+}
+
+pub fn handle_server_arg(server: Option<String>, config: &Config) -> Result<String> {
+    match server {
+        Some(server) => server_or_current(server, config),
+        None => match &config.aliases.get("default") {
+            Some(default) => Ok(default.to_string()),
+            None => Err(Error::NoDefaultServer),
+        },
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn paths() {
+        let expected_config_dir =
+            PathBuf::from(shellexpand::tilde("~/.config/mcserver/").into_owned());
+
+        assert_eq!(
+            &get_directory().expect("Failed to get config directory"),
+            &expected_config_dir
+        );
+    }
+
+    #[test]
+    fn parsing() {}
+}
