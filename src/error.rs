@@ -9,20 +9,19 @@ use kdl::KdlError;
 use reqwest::header;
 use thiserror::Error;
 
+use crate::config::{KdlValueType, NodeContext};
+
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ParseConfigError {
-    #[error("Field {field} is an invalid type; expected type: {expected_type}")]
-    InvalidType {
-        field: &'static str,
-        expected_type: &'static str,
-    },
+    #[error("Expected {0} to be type {1}")]
+    InvalidType(NodeContext, KdlValueType),
 
     #[error("Number {0} is out of bounds")]
     OutOfBounds(i128),
 
-    #[error("Argument {arg} is absent, but {purpose}")]
-    ExpectedArgument { arg: usize, purpose: &'static str },
+    #[error("Value of node is absent (context: {0})")]
+    ExpectedValue(NodeContext),
 
     // #[error("Expected field {0}")]
     // ExpectedField(&'static str),

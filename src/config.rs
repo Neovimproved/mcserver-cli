@@ -3,14 +3,14 @@ use std::{
     collections::HashMap,
     env::{self, VarError},
     ffi::OsStr,
-    fmt::{self, Debug, Formatter},
+    fmt::{self, Debug, Display, Formatter},
     fs, io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     result,
 };
 
-use kdl::{KdlDocument, KdlNode};
+use kdl::{KdlDocument, KdlIdentifier, KdlNode, KdlValue};
 use shellexpand::LookupError;
 
 use crate::{
@@ -96,6 +96,226 @@ pub struct Config {
     pub rcon: HashMap<String, RconConfig>,
 }
 
+#[derive(Debug)]
+pub enum NodeClass {
+    Aliases,
+    Rcon,
+}
+
+impl Display for NodeClass {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Aliases => "aliases",
+                Self::Rcon => "rcon",
+            }
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct NodeContext {
+    node_name: KdlIdentifier,
+    parent_class: Option<NodeClass>,
+}
+
+impl Display for NodeContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(node_class) = &self.parent_class {
+            write!(f, "{} of {}", self.node_name, node_class)
+        } else {
+            write!(f, "{}", self.node_name)
+        }
+    }
+}
+
+impl NodeContext {
+    fn new(node_name: KdlIdentifier) -> Self {
+        Self {
+            node_name,
+            parent_class: None,
+        }
+    }
+
+    fn with_parent_class(node_name: KdlIdentifier, parent_class: NodeClass) -> Self {
+        Self {
+            node_name,
+            parent_class: Some(parent_class),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum KdlValueType {
+    String,
+    Integer,
+    Float,
+    Bool,
+}
+
+impl Display for KdlValueType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::String => "string",
+                Self::Integer => "integer",
+                Self::Float => "float",
+                Self::Bool => "bool",
+            }
+        )
+    }
+}
+
+#[allow(unused)]
+trait KdlNodeExt {
+    fn get_value(&self) -> result::Result<&KdlValue, ParseConfigError>;
+
+    fn get_string_value(&self) -> result::Result<&str, ParseConfigError>;
+
+    fn get_integer_value(&self) -> result::Result<i128, ParseConfigError>;
+
+    fn get_float_value(&self) -> result::Result<f64, ParseConfigError>;
+
+    fn get_bool_value(&self) -> result::Result<bool, ParseConfigError>;
+
+    fn get_nested_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<&KdlValue, ParseConfigError>;
+
+    fn get_nested_string_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<&str, ParseConfigError>;
+
+    fn get_nested_integer_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<i128, ParseConfigError>;
+
+    fn get_nested_float_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<f64, ParseConfigError>;
+
+    fn get_nested_bool_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<bool, ParseConfigError>;
+}
+
+impl KdlNodeExt for KdlNode {
+    fn get_value(&self) -> result::Result<&KdlValue, ParseConfigError> {
+        self.get(0)
+            .ok_or_else(|| ParseConfigError::ExpectedValue(NodeContext::new(self.name().clone())))
+    }
+
+    fn get_string_value(&self) -> result::Result<&str, ParseConfigError> {
+        self.get_value()?.as_string().ok_or_else(|| {
+            ParseConfigError::InvalidType(
+                NodeContext::new(self.name().clone()),
+                KdlValueType::String,
+            )
+        })
+    }
+
+    fn get_integer_value(&self) -> result::Result<i128, ParseConfigError> {
+        self.get_value()?.as_integer().ok_or_else(|| {
+            ParseConfigError::InvalidType(
+                NodeContext::new(self.name().clone()),
+                KdlValueType::Integer,
+            )
+        })
+    }
+
+    fn get_float_value(&self) -> result::Result<f64, ParseConfigError> {
+        self.get_value()?.as_float().ok_or_else(|| {
+            ParseConfigError::InvalidType(
+                NodeContext::new(self.name().clone()),
+                KdlValueType::Float,
+            )
+        })
+    }
+
+    fn get_bool_value(&self) -> result::Result<bool, ParseConfigError> {
+        self.get_value()?.as_bool().ok_or_else(|| {
+            ParseConfigError::InvalidType(NodeContext::new(self.name().clone()), KdlValueType::Bool)
+        })
+    }
+
+    fn get_nested_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<&KdlValue, ParseConfigError> {
+        self.get(0).ok_or_else(|| {
+            ParseConfigError::ExpectedValue(NodeContext::with_parent_class(
+                self.name().clone(),
+                parent_class,
+            ))
+        })
+    }
+
+    fn get_nested_string_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<&str, ParseConfigError> {
+        self.get_nested_value(parent_class)?
+            .as_string()
+            .ok_or_else(|| {
+                ParseConfigError::InvalidType(
+                    NodeContext::new(self.name().clone()),
+                    KdlValueType::String,
+                )
+            })
+    }
+
+    fn get_nested_integer_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<i128, ParseConfigError> {
+        self.get_nested_value(parent_class)?
+            .as_integer()
+            .ok_or_else(|| {
+                ParseConfigError::InvalidType(
+                    NodeContext::new(self.name().clone()),
+                    KdlValueType::Integer,
+                )
+            })
+    }
+
+    fn get_nested_float_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<f64, ParseConfigError> {
+        self.get_nested_value(parent_class)?
+            .as_float()
+            .ok_or_else(|| {
+                ParseConfigError::InvalidType(
+                    NodeContext::new(self.name().clone()),
+                    KdlValueType::Float,
+                )
+            })
+    }
+
+    fn get_nested_bool_value(
+        &self,
+        parent_class: NodeClass,
+    ) -> result::Result<bool, ParseConfigError> {
+        self.get_nested_value(parent_class)?
+            .as_bool()
+            .ok_or_else(|| {
+                ParseConfigError::InvalidType(
+                    NodeContext::new(self.name().clone()),
+                    KdlValueType::Bool,
+                )
+            })
+    }
+}
+
 pub fn get_directory() -> Result<PathBuf> {
     let config_dir = dirs::config_dir()
         .ok_or(Error::UnresolvedConfigDirectory)?
@@ -116,35 +336,22 @@ pub fn edit_config_file(config_directory: &Path) -> Result<()> {
 
 fn parse_alias(node: &KdlNode) -> result::Result<(String, String), ParseConfigError> {
     let reference = node
-        .get(0)
-        .ok_or(ParseConfigError::ExpectedArgument {
-            arg: 0,
-            purpose: "specifying the reference to an alias",
-        })?
-        .as_string()
-        .ok_or(ParseConfigError::InvalidType {
-            field: "alias",
-            expected_type: "string",
-        })?
+        .get_nested_string_value(NodeClass::Aliases)?
         .to_string();
 
     Ok((node.name().to_string(), reference))
 }
 
-fn parse_number<T, E>(
+fn transform_number<T, E>(
     node: &KdlNode,
     f: impl Fn(i128) -> result::Result<T, E>,
-    name: &'static str,
+    parent_class: Option<NodeClass>,
 ) -> result::Result<T, ParseConfigError> {
-    let value = node.get(0).ok_or(ParseConfigError::ExpectedArgument {
-        arg: 0,
-        purpose: name,
-    })?;
-
-    let integer = value.as_integer().ok_or(ParseConfigError::InvalidType {
-        field: name,
-        expected_type: "integer",
-    })?;
+    let integer = if let Some(parent_class) = parent_class {
+        node.get_nested_integer_value(parent_class)
+    } else {
+        node.get_integer_value()
+    }?;
 
     f(integer).map_err(|_| ParseConfigError::OutOfBounds(integer))
 }
@@ -152,45 +359,23 @@ fn parse_number<T, E>(
 fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), ParseConfigError> {
     let children = node
         .children()
-        .ok_or(ParseConfigError::ExpectedChildren("rcon"))?;
+        .ok_or_else(|| ParseConfigError::ExpectedChildren("rcon"))?;
 
     let rcon_config = RconConfig {
         server_address: children
             .get("server_address")
-            .map(|node| {
-                node.get(0)
-                    .ok_or(ParseConfigError::ExpectedArgument {
-                        arg: 0,
-                        purpose: "server address",
-                    })?
-                    .as_string()
-                    .ok_or(ParseConfigError::InvalidType {
-                        field: "server_address",
-                        expected_type: "string",
-                    })
-            })
+            .map(|node| node.get_nested_string_value(NodeClass::Rcon))
             .transpose()?
             .map(String::from),
 
         port: children
             .get("port")
-            .map(|node| parse_number(node, u16::try_from, "port"))
+            .map(|node| transform_number(node, u16::try_from, Some(NodeClass::Rcon)))
             .transpose()?,
 
         password: children
             .get("password")
-            .map(|node| {
-                node.get(0)
-                    .ok_or(ParseConfigError::ExpectedArgument {
-                        arg: 0,
-                        purpose: "password",
-                    })?
-                    .as_string()
-                    .ok_or(ParseConfigError::InvalidType {
-                        field: "password",
-                        expected_type: "string",
-                    })
-            })
+            .map(|node| node.get_nested_string_value(NodeClass::Rcon))
             .transpose()?
             .map(|value| Password(value.to_string())),
     };
@@ -201,18 +386,7 @@ fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), Par
 fn parse_config(document: &KdlDocument) -> Result<Config> {
     let contact = document
         .get("contact")
-        .map(|node| {
-            node.get(0)
-                .ok_or(ParseConfigError::ExpectedArgument {
-                    arg: 0,
-                    purpose: "the contact must be specified",
-                })?
-                .as_string()
-                .ok_or(ParseConfigError::InvalidType {
-                    field: "contact",
-                    expected_type: "string",
-                })
-        })
+        .map(KdlNodeExt::get_string_value)
         .transpose()?
         .unwrap_or("none")
         .to_string();
@@ -228,36 +402,14 @@ fn parse_config(document: &KdlDocument) -> Result<Config> {
 
     let nogui = document
         .get("nogui")
-        .map(|node| {
-            node.get(0)
-                .ok_or(ParseConfigError::ExpectedArgument {
-                    arg: 0,
-                    purpose: "specifying nogui",
-                })?
-                .as_bool()
-                .ok_or(ParseConfigError::InvalidType {
-                    field: "nogui",
-                    expected_type: "boolean",
-                })
-        })
+        .map(|node| node.get_bool_value())
         .transpose()?
         .unwrap_or(true);
 
     let servers_directory = ServersDirectory::from(
         document
             .get("servers_directory")
-            .map(|node| {
-                node.get(0)
-                    .ok_or(ParseConfigError::ExpectedArgument {
-                        arg: 0,
-                        purpose: "servers directory must be specified",
-                    })?
-                    .as_string()
-                    .ok_or(ParseConfigError::InvalidType {
-                        field: "servers_directory",
-                        expected_type: "string",
-                    })
-            })
+            .map(KdlNodeExt::get_string_value)
             .transpose()?
             .unwrap_or("~/Servers"),
     );
