@@ -583,5 +583,25 @@ mod test {
     }
 
     #[test]
-    fn parsing() {}
+    fn parsing() {
+        let parsed_alias = parse_alias(
+            &KdlNode::parse("default my-server").expect("Failed to parse alias test node"),
+        )
+        .expect("Failed to parse alias");
+
+        assert_eq!(
+            (parsed_alias.0.as_str(), parsed_alias.1.as_str()),
+            ("default", "my-server")
+        );
+
+        assert_eq!(
+            transform_number(
+                &KdlNode::parse("number 69").expect("Failed to parse number test node"),
+                u8::try_from,
+                None
+            )
+            .expect("Failed to transform number"),
+            69
+        );
+    }
 }
