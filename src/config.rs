@@ -359,7 +359,7 @@ fn transform_number<T, E>(
 fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), ParseConfigError> {
     let children = node
         .children()
-        .ok_or_else(|| ParseConfigError::ExpectedChildren("rcon"))?;
+        .ok_or(ParseConfigError::ExpectedChildren("rcon"))?;
 
     let rcon_config = RconConfig {
         server_address: children
