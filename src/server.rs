@@ -1004,8 +1004,8 @@ pub fn rcon<T: AsRef<OsStr>>(
 #[cfg(test)]
 mod test {
 
-    #[test]
-    fn idk() {
-        todo!();
-    }
+    // #[test]
+    // fn idk() {
+    //     todo!();
+    // }
 }
