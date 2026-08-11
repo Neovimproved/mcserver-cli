@@ -88,6 +88,9 @@ pub enum Commands {
 
         #[arg(short, long, conflicts_with = "inactive")]
         dead: bool,
+
+        #[arg(short, default_value_t)]
+        flat: bool,
     },
 
     #[command(about = "Interact with a server, using the minecraft remote console")]

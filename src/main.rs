@@ -73,6 +73,7 @@ fn main() -> Result<()> {
             active,
             inactive,
             dead,
+            flat,
         } => {
             let mut servers = vec![];
             server::for_each(
@@ -97,10 +98,16 @@ fn main() -> Result<()> {
                     .wrap_err("Failed to tag active servers")?;
             }
 
-            println!(
-                "{}",
-                server::ServerTreeNode::try_from_flat_objects(servers)?
-            )
+            if flat {
+                for server in servers {
+                    println!("{server}");
+                }
+            } else {
+                println!(
+                    "{}",
+                    server::ServerTreeNode::try_from_flat_objects(servers)?
+                )
+            }
         }
         Commands::Rcon { server, commands } => {
             server::rcon(handle_server_arg(server, &config)?, commands, &config)

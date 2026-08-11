@@ -108,6 +108,13 @@ pub struct AbsoluteServerObject {
     tags: ServerTags,
 }
 
+impl Display for AbsoluteServerObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.path.display())?;
+        write!(f, "{}", self.tags)
+    }
+}
+
 impl AbsoluteServerObject {
     pub fn new(path: PathBuf) -> Self {
         Self {
