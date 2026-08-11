@@ -5,6 +5,7 @@ use std::{
     fmt::{self, Display, Formatter},
     fs::{self, File},
     io::{self, Write},
+    os::unix::fs::PermissionsExt,
     path::{MAIN_SEPARATOR_STR, Path, PathBuf},
     process::Command,
     result,
@@ -449,22 +450,34 @@ fn set_last_used_metadata(metadata_dir: impl AsRef<Path>, timestamp: u64) -> Res
     Ok(())
 }
 
-pub fn set_jar_file_metadata(metadata_dir: impl AsRef<Path>, jar_file_name: &[u8]) -> Result<File> {
-    let mut jar_file_txt = File::create(metadata_dir.as_ref().join(JAR_FILE_TXT_NAME))?;
-    jar_file_txt.write_all(jar_file_name)?;
-    Ok(jar_file_txt)
+pub fn set_jar_file_metadata(metadata_dir: &Path, jar_file_name: &[u8]) -> Result<()> {
+    let file_path = metadata_dir.join(JAR_FILE_TXT_NAME);
+
+    if fs::exists(&file_path)? {
+        let original_permissions = fs::metadata(&file_path)?.permissions();
+
+        let mut new_permissions = original_permissions.clone();
+
+        // writable by the owner
+        new_permissions.set_mode(original_permissions.mode() | 0o200);
+
+        fs::set_permissions(&file_path, new_permissions)?;
+
+        fs::write(&file_path, jar_file_name)?;
+
+        fs::set_permissions(&file_path, original_permissions)?;
+    } else {
+        fs::write(&file_path, jar_file_name)?;
+    }
+
+    Ok(())
 }
 
-pub fn set_default_metadata(metadata_dir: impl AsRef<Path>, jar_file_name: &[u8]) -> Result<()> {
-    fs::create_dir_all(&metadata_dir)?;
+pub fn set_default_metadata(metadata_dir: &Path, jar_file_name: &[u8]) -> Result<()> {
+    fs::create_dir_all(metadata_dir)?;
 
-    let jar_file_txt = set_jar_file_metadata(&metadata_dir, jar_file_name)?;
-
-    let mut perms = jar_file_txt.metadata()?.permissions();
-    perms.set_readonly(true);
-    jar_file_txt.set_permissions(perms)?;
-
-    set_last_used_metadata(&metadata_dir, u64::MAX)?;
+    set_jar_file_metadata(metadata_dir, jar_file_name)?;
+    set_last_used_metadata(metadata_dir, u64::MAX)?;
 
     Ok(())
 }
@@ -518,7 +531,7 @@ pub fn create_new(
     copy_jar(&server_dir, &jar_file_name, jar)?;
 
     set_default_metadata(
-        server_dir.join(METADATA_DIRECTORY_NAME),
+        &server_dir.join(METADATA_DIRECTORY_NAME),
         &jar_file_name.into_bytes(),
     )?;
 
@@ -543,7 +556,7 @@ pub fn update_existing(
     copy_jar(&server_dir, &jar_file_name, jar)?;
 
     set_jar_file_metadata(
-        server_dir.join(METADATA_DIRECTORY_NAME),
+        &server_dir.join(METADATA_DIRECTORY_NAME),
         &jar_file_name.into_bytes(),
     )?;
 
