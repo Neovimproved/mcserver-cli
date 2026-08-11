@@ -5,7 +5,7 @@ use std::{
     fmt::{self, Display, Formatter},
     fs::{self, File},
     io::{self, Write},
-    path::{MAIN_SEPARATOR, Path, PathBuf},
+    path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -56,6 +56,7 @@ impl Display for ServerObject {
 
 pub fn copy_directory(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
     fs::create_dir_all(&dst)?;
+
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -146,21 +147,13 @@ fn set_last_used_metadata(metadata_dir: impl AsRef<Path>, timestamp: u64) -> Res
     Ok(())
 }
 
-pub fn set_jar_file_metadata<M, J>(metadata_dir: M, jar_file_name: J) -> Result<File>
-where
-    M: AsRef<Path>,
-    J: Display,
-{
+pub fn set_jar_file_metadata(metadata_dir: impl AsRef<Path>, jar_file_name: &[u8]) -> Result<File> {
     let mut jar_file_txt = File::create(metadata_dir.as_ref().join(JAR_FILE_TXT_NAME))?;
-    writeln!(jar_file_txt, "{jar_file_name}")?;
+    jar_file_txt.write_all(jar_file_name)?;
     Ok(jar_file_txt)
 }
 
-pub fn set_default_metadata<M, J>(metadata_dir: M, jar_file_name: J) -> Result<()>
-where
-    M: AsRef<Path>,
-    J: Display,
-{
+pub fn set_default_metadata(metadata_dir: impl AsRef<Path>, jar_file_name: &[u8]) -> Result<()> {
     fs::create_dir_all(&metadata_dir)?;
 
     let jar_file_txt = set_jar_file_metadata(&metadata_dir, jar_file_name)?;
@@ -174,11 +167,11 @@ where
     Ok(())
 }
 
-fn copy_jar<S, J, F>(server_dir: S, mut jar: J, file_name: F) -> Result<()>
+fn copy_jar<S, F, J>(server_dir: S, file_name: F, mut jar: J) -> Result<()>
 where
     S: AsRef<Path>,
-    J: io::Read,
     F: AsRef<Path>,
+    J: io::Read,
 {
     env::set_current_dir(server_dir)?;
 
@@ -205,16 +198,13 @@ pub fn get_jar(download_url: Url, platform: Platform) -> Result<(Response, Strin
     Ok((response, file_name))
 }
 
-pub fn create_new<N>(
+pub fn create_new(
     platform: Platform,
     version: Option<String>,
-    name: Option<N>,
+    name: Option<impl Display>,
     config: &Config,
-) -> Result<()>
-where
-    N: Display,
-{
-    let download_url = platforms::get(platform, version, config)?;
+) -> Result<()> {
+    let download_url = platforms::get(platform, version)?;
 
     let server_dir = match name {
         Some(name) => get_first_server_path(name, config)?,
@@ -223,26 +213,37 @@ where
 
     fs::create_dir_all(&server_dir)?;
     let (jar, jar_file_name) = get_jar(download_url, platform)?;
-    copy_jar(&server_dir, jar, &jar_file_name)?;
-    set_default_metadata(server_dir.join(METADATA_DIRECTORY_NAME), jar_file_name)?;
+    copy_jar(&server_dir, &jar_file_name, jar)?;
+
+    set_default_metadata(
+        server_dir.join(METADATA_DIRECTORY_NAME),
+        &jar_file_name.into_bytes(),
+    )?;
+
     Ok(())
 }
 
-pub fn update_existing<S>(
-    server: S,
+pub fn resolve_server(server: String) -> String {
+    server.replace(".", MAIN_SEPARATOR_STR)
+}
+
+pub fn update_existing(
+    server: String,
     platform: Platform,
     version: Option<String>,
     config: &Config,
-) -> Result<()>
-where
-    S: AsRef<Path>,
-{
-    let download_url = platforms::get(platform, version, config)?;
-    let server_dir = PathBuf::from(config.servers_directory.expand()?).join(&server);
+) -> Result<()> {
+    let download_url = platforms::get(platform, version)?;
+
+    let server_dir = PathBuf::from(config.servers_directory.expand()?).join(resolve_server(server));
 
     let (jar, jar_file_name) = get_jar(download_url, platform)?;
-    copy_jar(&server, jar, &jar_file_name)?;
-    set_jar_file_metadata(server_dir.join(METADATA_DIRECTORY_NAME), jar_file_name)?;
+    copy_jar(&server_dir, &jar_file_name, jar)?;
+
+    set_jar_file_metadata(
+        server_dir.join(METADATA_DIRECTORY_NAME),
+        &jar_file_name.into_bytes(),
+    )?;
 
     Ok(())
 }
@@ -658,11 +659,11 @@ pub fn fully_tag_servers(servers: &mut [ServerObject], config: &Config) -> Resul
     Ok(())
 }
 
-pub fn rcon<C, T>(server: impl AsRef<str>, commands: C, config: &Config) -> Result<()>
-where
-    C: AsRef<[T]>,
-    T: AsRef<OsStr>,
-{
+pub fn rcon<T: AsRef<OsStr>>(
+    server: impl AsRef<str>,
+    commands: impl AsRef<[T]>,
+    config: &Config,
+) -> Result<()> {
     let rcon_config = &config.rcon;
 
     let server_rcon_config = rcon_config
@@ -699,5 +700,14 @@ where
             code: status.code(),
             stderr: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn idk() {
+        todo!();
     }
 }

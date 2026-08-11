@@ -20,6 +20,7 @@ pub const SUFFIX: &str = ".mcserver";
 
 pub const TIMER: &str = "for i in {3..1}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done";
 
+/// Get the session name of the server
 pub fn get_name(server: impl AsRef<str>) -> String {
     format!("{}{SUFFIX}", server.as_ref().replace(MAIN_SEPARATOR, "."))
 }
@@ -125,11 +126,10 @@ pub fn attach(server: impl AsRef<str>, config: &Config) -> Result<()> {
     }
 }
 
-pub fn new_session<S, I>(session: S, initial_command: Option<I>) -> Result<()>
-where
-    S: AsRef<OsStr>,
-    I: AsRef<OsStr>,
-{
+pub fn new_session<S: AsRef<OsStr>, I: AsRef<OsStr>>(
+    session: S,
+    initial_command: Option<I>,
+) -> Result<()> {
     Command::new(BASE_COMMAND)
         .arg("delete-session")
         .arg(&session)
