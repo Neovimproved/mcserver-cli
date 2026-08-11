@@ -88,7 +88,6 @@ impl ServersDirectory {
 
 #[derive(Debug)]
 pub struct Config {
-    pub contact: String,
     pub default_java_args: Vec<String>,
     pub nogui: bool,
     pub servers_directory: ServersDirectory,
@@ -384,13 +383,6 @@ fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), Par
 }
 
 fn parse_config(document: &KdlDocument) -> Result<Config> {
-    let contact = document
-        .get("contact")
-        .map(KdlNodeExt::get_string_value)
-        .transpose()?
-        .unwrap_or("none")
-        .to_string();
-
     let default_java_args: Vec<String> = document
         .get("default_java_args")
         .map(|node| {
@@ -427,7 +419,6 @@ fn parse_config(document: &KdlDocument) -> Result<Config> {
         .unwrap_or_default();
 
     Ok(Config {
-        contact,
         default_java_args,
         nogui,
         servers_directory,

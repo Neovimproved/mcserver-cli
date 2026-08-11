@@ -13,7 +13,6 @@ use url::Url;
 
 use crate::{
     cli::Platform,
-    config::Config,
     error::{Error, Result},
 };
 
@@ -26,13 +25,16 @@ const PAPER_BASE_DOWNLOAD_URL: &str = "https://fill-data.papermc.io/v1/objects";
 
 const PURPUR_BASE_API_URL: &str = "https://api.purpurmc.org/v2/purpur";
 
-fn get_client(config: &Config) -> Result<&'static Client> {
+fn get_client() -> Result<&'static Client> {
     if let Some(client) = CLIENT.get() {
         return Ok(client);
     }
 
     let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, HeaderValue::from_str(&config.contact)?);
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_static(concat!("mcserver-v", env!("CARGO_PKG_VERSION"))),
+    );
 
     let client = Client::builder().default_headers(headers).build()?;
 
@@ -105,8 +107,8 @@ struct PaperApplication {
     sha256: String,
 }
 
-fn get_paper(version: Option<String>, config: &Config) -> Result<String> {
-    let client = get_client(config)?;
+fn get_paper(version: Option<String>) -> Result<String> {
+    let client = get_client()?;
 
     let version = version.map_or_else(
         || {
@@ -182,7 +184,7 @@ impl Display for Platform {
     }
 }
 
-pub fn get(platform: Platform, version: Option<String>, config: &Config) -> Result<Url> {
+pub fn get(platform: Platform, version: Option<String>) -> Result<Url> {
     // set version to none if the it is "latest" so that it defaults to the latest one
     let version = version.filter(|v| v != "latest");
 
@@ -190,7 +192,7 @@ pub fn get(platform: Platform, version: Option<String>, config: &Config) -> Resu
         Platform::Fabric => get_fabric(version)?,
         Platform::Forge => todo!(),
         Platform::Neoforge => todo!(),
-        Platform::Paper => get_paper(version, config)?,
+        Platform::Paper => get_paper(version)?,
         Platform::Purpur => get_purpur(version)?,
     };
 
