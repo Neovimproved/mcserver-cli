@@ -29,7 +29,7 @@ fn get_server_sessions_raw_string() -> Result<Option<String>> {
     let output = Command::new(BASE_COMMAND).arg("list-sessions").output()?;
 
     match output.status.code() {
-        Some(0) => Ok(Some(String::from_utf8_lossy(&output.stdout).to_string())),
+        Some(0) => Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned())),
         Some(1) => Ok(None), // no sessions
         _ => Err(Error::CommandFailure {
             code: output.status.code(),
@@ -54,46 +54,47 @@ fn session_is_alive(session_line: impl AsRef<str>) -> bool {
 
 fn session_line_to_server(session_line: impl AsRef<str>) -> Option<String> {
     let session_line = session_line.as_ref();
-    let session_name = &session_line[7..session_line.rfind("[Created")? - 5];
+    let session_name = &session_line[7..session_line.rfind("[Created")? - 4];
 
     session_name.strip_suffix(session::SUFFIX).map(String::from)
 }
 
 pub fn get_alive_server_sessions() -> Result<HashSet<String>> {
-    Ok(get_server_sessions_raw_string()?
-        .map(|server_sessions| {
-            server_sessions
-                .lines()
-                .filter(|sl| session_is_alive(sl))
-                .filter_map(session_line_to_server)
-                .collect()
-        })
-        .unwrap_or_default())
+    let Some(server_sessions) = get_server_sessions_raw_string()? else {
+        return Ok(HashSet::new());
+    };
+
+    Ok(server_sessions
+        .lines()
+        .filter(|sl| session_is_alive(sl))
+        .filter_map(session_line_to_server)
+        .collect())
 }
 
 pub fn get_dead_server_sessions() -> Result<HashSet<String>> {
-    Ok(get_server_sessions_raw_string()?
-        .map(|server_sessions| {
-            server_sessions
-                .lines()
-                .filter(|sl| session_has_exited(sl))
-                .filter_map(session_line_to_server)
-                .collect()
-        })
-        .unwrap_or_default())
+    let Some(server_sessions) = get_server_sessions_raw_string()? else {
+        return Ok(HashSet::new());
+    };
+
+    Ok(server_sessions
+        .lines()
+        .filter(|sl| session_has_exited(sl))
+        .filter_map(session_line_to_server)
+        .collect())
 }
 
 pub fn get_server_sessions_to_living() -> Result<HashMap<String, bool>> {
-    Ok(get_server_sessions_raw_string()?
-        .map(|ss| {
-            ss.lines()
-                .map(|s| (s, session_is_alive(s)))
-                .filter_map(|(session, living)| {
-                    session_line_to_server(session).map(|server| (server, living))
-                })
-                .collect()
+    let Some(server_sessions) = get_server_sessions_raw_string()? else {
+        return Ok(HashMap::new());
+    };
+
+    Ok(server_sessions
+        .lines()
+        .map(|s| (s, session_is_alive(s)))
+        .filter_map(|(session, living)| {
+            session_line_to_server(session).map(|server| (server, living))
         })
-        .unwrap_or_default())
+        .collect())
 }
 
 pub fn attach(server: impl AsRef<str>, config: &Config) -> Result<()> {

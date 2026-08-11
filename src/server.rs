@@ -6,7 +6,7 @@ use std::{
     fs::{self, File},
     io::{self, Write},
     os::unix::fs::PermissionsExt,
-    path::{MAIN_SEPARATOR_STR, Path, PathBuf},
+    path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf},
     process::Command,
     result,
     time::{SystemTime, UNIX_EPOCH},
@@ -56,8 +56,6 @@ impl Display for LastUsed {
 pub enum ServerState {
     Active,
     Dead,
-    #[allow(unused)]
-    Alive,
 }
 
 impl Display for ServerState {
@@ -68,7 +66,6 @@ impl Display for ServerState {
             match self {
                 ServerState::Active => "(\x1b[32;1mactive\x1b[0m)",
                 ServerState::Dead => "(\x1b[31;1mdead\x1b[0m)",
-                ServerState::Alive => todo!(),
             }
         )
     }
@@ -317,7 +314,7 @@ impl ServerTreeNode {
                 writeln!(f, "{}", server_directory.name)?;
 
                 let next_indentation = format!("{base_indentation}│   ");
-                let last_idx = server_directory.children.iter().len() - 1;
+                let last_idx = server_directory.children.iter().len().saturating_sub(1);
 
                 for (idx, value) in server_directory.children.values().enumerate() {
                     write!(f, "{base_indentation}")?;
@@ -942,10 +939,16 @@ pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Con
 }
 
 pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) -> Result<()> {
-    let mapped_sessions = get_server_sessions_to_living()?;
+    let mapped_sessions = dbg!(get_server_sessions_to_living())?;
 
     servers.iter_mut().for_each(|server| {
-        match mapped_sessions.get(server.path.to_string_lossy().as_ref()) {
+        match mapped_sessions.get(
+            &server
+                .path
+                .to_string_lossy()
+                .as_ref()
+                .replace(MAIN_SEPARATOR, "."),
+        ) {
             Some(true) => server.set_state(ServerState::Active),
             Some(false) => {
                 add_last_used_tag(server, config);
