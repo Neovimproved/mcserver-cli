@@ -14,7 +14,7 @@ use kdl::{KdlDocument, KdlIdentifier, KdlNode, KdlValue};
 use shellexpand::LookupError;
 
 use crate::{
-    error::{Error, ParseConfigError, Result},
+    error::{Error, InvalidServersDirectoryError, ParseConfigError, Result},
     server,
 };
 
@@ -524,13 +524,12 @@ pub fn get_current_server_directory(servers_dir: &Path) -> Result<String> {
 
         server_path = server_path
             .parent()
-            .ok_or(Error::InvalidServersDirectory)?
+            .ok_or_else(|| InvalidServersDirectoryError::MissingParent(server_path.clone()))?
             .to_path_buf();
     }
 
     let server = server_path
-        .strip_prefix(servers_dir)
-        .map_err(|_| Error::InvalidServersDirectory)?
+        .strip_prefix(servers_dir)?
         .to_string_lossy()
         .into_owned();
 

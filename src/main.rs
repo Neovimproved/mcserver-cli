@@ -75,8 +75,11 @@ fn main() -> Result<()> {
             dead,
         } => {
             let mut servers = vec![];
-            server::for_each(|s| servers.push(server::ServerObject::new(s)), &config)
-                .wrap_err("Failed to get servers")?;
+            server::for_each(
+                |s| servers.push(server::AbsoluteServerObject::new(s.to_path_buf())),
+                &config,
+            )
+            .wrap_err("Failed to get servers")?;
 
             if active {
                 server::retain_active(&mut servers).wrap_err("Failed to retain active servers")?;
@@ -94,9 +97,10 @@ fn main() -> Result<()> {
                     .wrap_err("Failed to tag active servers")?;
             }
 
-            for server in servers {
-                println!("{server}");
-            }
+            println!(
+                "{}",
+                server::ServerTreeNode::try_from_flat_objects(servers)?
+            )
         }
         Commands::Rcon { server, commands } => {
             server::rcon(handle_server_arg(server, &config)?, commands, &config)

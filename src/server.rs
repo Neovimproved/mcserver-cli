@@ -1,12 +1,13 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet, hash_map::Entry},
     env,
     ffi::OsStr,
     fmt::{self, Display, Formatter},
     fs::{self, File},
     io::{self, Write},
-    path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf},
+    path::{MAIN_SEPARATOR_STR, Path, PathBuf},
     process::Command,
+    result,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -19,7 +20,7 @@ use url::Url;
 use crate::{
     cli::Platform,
     config::{Config, server_or_current},
-    error::{Error, Result},
+    error::{Error, InvalidServersDirectoryError, Result},
     platforms::{self},
     session::{
         self, get_alive_server_sessions, get_dead_server_sessions, get_server_sessions_to_living,
@@ -33,24 +34,318 @@ pub const METADATA_DIRECTORY_NAME: &str = ".mcserver";
 const JAR_FILE_TXT_NAME: &str = "jar_file.txt";
 const LAST_USED_FILE: &str = "last_used.timestamp";
 
-pub struct ServerObject {
-    pub name: String,
-    pub tags: Vec<String>,
+#[derive(Debug)]
+pub enum LastUsed {
+    Never,
+    Unknown,
+    Time(String),
 }
 
-impl ServerObject {
-    pub fn new(name: String) -> Self {
-        ServerObject { name, tags: vec![] }
+impl Display for LastUsed {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            LastUsed::Never => write!(f, "(Last used \x1b[35;1mnever\x1b[0m)"),
+            LastUsed::Unknown => write!(f, "(Last used unknown)"),
+            LastUsed::Time(time) => write!(f, "(Last used \x1b[35;1m{time}\x1b[0m ago)"),
+        }
     }
 }
 
-impl Display for ServerObject {
+#[derive(Debug)]
+pub enum ServerState {
+    Active,
+    Dead,
+    #[allow(unused)]
+    Alive,
+}
+
+impl Display for ServerState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                ServerState::Active => "(\x1b[32;1mactive\x1b[0m)",
+                ServerState::Dead => "(\x1b[31;1mdead\x1b[0m)",
+                ServerState::Alive => todo!(),
+            }
+        )
+    }
+}
+
+#[derive(Debug)]
+struct ServerTags {
+    last_used: Option<LastUsed>,
+    state: Option<ServerState>,
+}
+
+impl ServerTags {
+    fn new() -> Self {
+        Self {
+            last_used: None,
+            state: None,
+        }
+    }
+}
+
+impl Display for ServerTags {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(state) = &self.state {
+            write!(f, " {state}")?;
+        }
+
+        if let Some(last_used) = &self.last_used {
+            write!(f, " {last_used}")?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct AbsoluteServerObject {
+    path: PathBuf,
+    tags: ServerTags,
+}
+
+impl AbsoluteServerObject {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            tags: ServerTags::new(),
+        }
+    }
+
+    fn set_last_used(&mut self, last_used: LastUsed) {
+        self.tags.last_used = Some(last_used);
+    }
+
+    fn set_state(&mut self, state: ServerState) {
+        self.tags.state = Some(state);
+    }
+}
+
+#[derive(Debug)]
+pub struct NamedServerObject {
+    name: String,
+    tags: ServerTags,
+}
+
+impl Display for NamedServerObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
-        for tag in &self.tags {
-            write!(f, " {tag}")?;
-        }
+        write!(f, "{}", self.tags)
+    }
+}
+
+impl TryFrom<AbsoluteServerObject> for NamedServerObject {
+    type Error = ();
+
+    fn try_from(value: AbsoluteServerObject) -> result::Result<Self, Self::Error> {
+        Ok(Self {
+            name: value
+                .path
+                .iter()
+                .next_back()
+                .ok_or(())?
+                .to_string_lossy()
+                .into_owned(),
+            tags: value.tags,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct RelativeServerObject {
+    relative_path: PathBuf,
+    object: NamedServerObject,
+}
+
+#[derive(Debug)]
+enum ServerUnwrapResult {
+    Relative(String, RelativeServerObject),
+    Finished(NamedServerObject),
+}
+
+impl RelativeServerObject {
+    fn unwrap_layer(self) -> result::Result<ServerUnwrapResult, InvalidServersDirectoryError> {
+        let mut components = self.relative_path.components();
+        let removed = components.next();
+
+        Ok(if let Some(removed) = removed {
+            ServerUnwrapResult::Relative(
+                removed.as_os_str().to_string_lossy().into_owned(),
+                Self {
+                    relative_path: components.collect(),
+                    object: self.object,
+                },
+            )
+        } else {
+            ServerUnwrapResult::Finished(self.object)
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct ServerDirectory {
+    #[allow(unused)]
+    name: String,
+    children: HashMap<String, ServerTreeNode>,
+}
+
+impl ServerDirectory {
+    fn insert(
+        &mut self,
+        obj: RelativeServerObject,
+    ) -> result::Result<(), InvalidServersDirectoryError> {
+        match obj.unwrap_layer()? {
+            ServerUnwrapResult::Finished(named_server_object) => {
+                self.add_object(named_server_object)?
+            }
+            ServerUnwrapResult::Relative(directory, relative_server_object) => {
+                self.nest_object(directory, relative_server_object)?
+            }
+        };
+
         Ok(())
+    }
+
+    fn add_object(
+        &mut self,
+        obj: NamedServerObject,
+    ) -> result::Result<(), InvalidServersDirectoryError> {
+        match self.children.entry(obj.name.clone()) {
+            Entry::Occupied(occupied) => {
+                return Err(InvalidServersDirectoryError::DuplicateServer(
+                    occupied.key().clone(),
+                ));
+            }
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(ServerTreeNode::Child(obj));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn nest_object(
+        &mut self,
+        directory: String,
+        obj: RelativeServerObject,
+    ) -> result::Result<(), InvalidServersDirectoryError> {
+        match self.children.entry(directory) {
+            Entry::Occupied(mut occupied_entry) => match occupied_entry.get_mut() {
+                ServerTreeNode::Child(child) => {
+                    return Err(InvalidServersDirectoryError::DuplicateServer(
+                        child.name.clone(),
+                    ));
+                }
+                ServerTreeNode::Directory(server_parent) => {
+                    server_parent.insert(obj)?;
+                }
+            },
+            Entry::Vacant(vacant_entry) => {
+                let name = vacant_entry.key().clone();
+
+                let mut child = ServerDirectory {
+                    name,
+                    children: HashMap::new(),
+                };
+
+                child.insert(obj)?;
+
+                vacant_entry.insert(ServerTreeNode::Directory(child));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+#[allow(unused)]
+pub enum ServerTreeNode {
+    Child(NamedServerObject),
+    Directory(ServerDirectory),
+}
+
+impl ServerTreeNode {
+    pub fn try_from_flat_objects(objects: Vec<AbsoluteServerObject>) -> Result<Self> {
+        let name = "servers";
+
+        let mut root = ServerDirectory {
+            name: name.to_string(),
+            children: HashMap::new(),
+        };
+
+        for obj in objects {
+            let path = obj.path;
+            let tags = obj.tags;
+
+            let mut path_iter = path.iter();
+
+            let name = path_iter
+                .next_back()
+                .ok_or_else(|| InvalidServersDirectoryError::MissingServerHead(path.clone()))?
+                .to_string_lossy()
+                .into_owned();
+
+            root.insert(RelativeServerObject {
+                relative_path: path_iter.collect(),
+                object: NamedServerObject { name, tags },
+            })?;
+        }
+
+        Ok(Self::Directory(root))
+    }
+
+    fn pretty_fmt(&self, f: &mut Formatter<'_>, base_indentation: &str) -> fmt::Result {
+        match self {
+            Self::Child(named_server_object) => {
+                write!(f, "{named_server_object}")
+            }
+            Self::Directory(server_directory) => {
+                // println!("For {}", server_directory.name);
+                writeln!(f, "{}", server_directory.name)?;
+
+                let next_indentation = format!("{base_indentation}│   ");
+                let last_idx = server_directory.children.iter().len() - 1;
+
+                for (idx, value) in server_directory.children.values().enumerate() {
+                    write!(f, "{base_indentation}")?;
+
+                    if idx == last_idx {
+                        write!(f, "└──")?;
+                        value.pretty_fmt(f, &format!("{base_indentation}    "))?;
+                    } else {
+                        write!(f, "├──")?;
+                        value.pretty_fmt(f, &next_indentation)?;
+                        writeln!(f)?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    #[allow(unused)]
+    fn name(&self) -> &str {
+        match self {
+            Self::Child(named_server_object) => &named_server_object.name,
+            Self::Directory(server_directory) => &server_directory.name,
+        }
+    }
+}
+
+impl Display for ServerTreeNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // characters:
+        // │
+        // ├──
+        // └──
+
+        self.pretty_fmt(f, "")
     }
 }
 
@@ -266,12 +561,6 @@ pub fn save_last_used_now(server: impl AsRef<Path>, config: &Config) -> Result<(
     Ok(())
 }
 
-pub enum LastUsed {
-    Never,
-    Unknown,
-    Time(String),
-}
-
 pub fn get_last_used(server: impl AsRef<Path>, config: &Config) -> Result<LastUsed> {
     let timestamp_path = config
         .servers_directory
@@ -340,7 +629,7 @@ pub fn get_last_used(server: impl AsRef<Path>, config: &Config) -> Result<LastUs
 }
 
 fn for_each_with_servers(
-    f: &mut impl FnMut(String),
+    f: &mut impl FnMut(&Path),
     parent_dir: impl AsRef<Path>,
     servers_dir: impl AsRef<Path>,
 ) -> Result<()> {
@@ -351,10 +640,7 @@ fn for_each_with_servers(
 
         // TODO: fix the paths pls ok, thank you
         if fs::exists(entry_path.join(METADATA_DIRECTORY_NAME))? {
-            f(entry_path
-                .strip_prefix(servers_dir.as_ref())?
-                .to_string_lossy()
-                .replace(MAIN_SEPARATOR, "."));
+            f(entry_path.strip_prefix(&servers_dir)?);
         } else {
             for_each_with_servers(f, entry_path, servers_dir.as_ref())?;
         }
@@ -363,7 +649,7 @@ fn for_each_with_servers(
     Ok(())
 }
 
-pub fn for_each(mut f: impl FnMut(String), config: &Config) -> Result<()> {
+pub fn for_each(mut f: impl FnMut(&Path), config: &Config) -> Result<()> {
     let servers_dir = config.servers_directory.expand()?;
 
     if !servers_dir.exists() || !servers_dir.is_dir() {
@@ -376,14 +662,15 @@ pub fn for_each(mut f: impl FnMut(String), config: &Config) -> Result<()> {
 }
 
 pub fn get_all_hashed(config: &Config) -> Result<HashSet<String>> {
-    let mut servers = HashSet::new();
+    let mut servers = HashSet::<String>::new();
 
     for_each(
         |s| {
-            servers.insert(s);
+            servers.insert(s.to_string_lossy().into_owned());
         },
         config,
     )?;
+
     Ok(servers)
 }
 
@@ -587,75 +874,66 @@ pub fn reinstall_with_crate() -> io::Result<()> {
     Ok(())
 }
 
-fn add_last_used_tag(server: &mut ServerObject, config: &Config) {
-    let last_used = get_last_used(&server.name, config);
-
-    server
-        .tags
-        .push(match last_used.unwrap_or(LastUsed::Unknown) {
-            LastUsed::Never => "(Last used \x1b[35;1mnever\x1b[0m)".to_string(),
-            LastUsed::Unknown => "(Last used unknown)".to_string(),
-            LastUsed::Time(time) => format!("(Last used \x1b[35;1m{time}\x1b[0m ago)"),
-        });
-}
-
-fn tag_as_active(server: &mut ServerObject) {
-    server.tags.push("(\x1b[32;1mactive\x1b[0m)".to_string());
-}
-
-fn tag_as_dead(server: &mut ServerObject) {
-    server.tags.push("(\x1b[31;1mdead\x1b[0m)".to_string())
-}
-
-pub fn tag_dead(servers: &mut [ServerObject]) -> Result<()> {
+pub fn tag_dead(servers: &mut [AbsoluteServerObject]) -> Result<()> {
     let sessions = get_alive_server_sessions()?;
 
     servers.iter_mut().for_each(|server| {
-        if sessions.contains(&server.name) {
-            tag_as_dead(server);
+        if sessions.contains(server.path.to_string_lossy().as_ref()) {
+            server.set_state(ServerState::Dead);
         }
     });
 
     Ok(())
 }
 
-pub fn retain_active(servers: &mut Vec<ServerObject>) -> Result<()> {
+pub fn retain_active(servers: &mut Vec<AbsoluteServerObject>) -> Result<()> {
     let sessions = get_alive_server_sessions()?;
-    servers.retain(|server| sessions.contains(&server.name));
+    servers.retain(|server| sessions.contains(server.path.to_string_lossy().as_ref()));
     Ok(())
 }
 
-pub fn retain_and_tag_inactive(servers: &mut Vec<ServerObject>, config: &Config) -> Result<()> {
+fn add_last_used_tag(server: &mut AbsoluteServerObject, config: &Config) {
+    server.set_last_used(get_last_used(&server.path, config).unwrap_or(LastUsed::Unknown));
+}
+
+pub fn retain_and_tag_inactive(
+    servers: &mut Vec<AbsoluteServerObject>,
+    config: &Config,
+) -> Result<()> {
     let sessions = get_alive_server_sessions()?;
-    servers.retain(|server| !sessions.contains(&server.name));
+
+    servers.retain(|server| !sessions.contains(server.path.to_string_lossy().as_ref()));
+
     servers
         .iter_mut()
-        .for_each(|server: &mut ServerObject| add_last_used_tag(server, config));
+        .for_each(|server: &mut AbsoluteServerObject| add_last_used_tag(server, config));
+
     Ok(())
 }
 
-pub fn retain_and_tag_dead(servers: &mut Vec<ServerObject>, config: &Config) -> Result<()> {
+pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Config) -> Result<()> {
     let dead_sessions = get_dead_server_sessions()?;
-    servers.retain(|server| dead_sessions.contains(&server.name));
-    servers.iter_mut().for_each(|server: &mut ServerObject| {
-        add_last_used_tag(server, config);
-    });
+    servers.retain(|server| dead_sessions.contains(server.path.to_string_lossy().as_ref()));
+
+    servers
+        .iter_mut()
+        .for_each(|server: &mut AbsoluteServerObject| add_last_used_tag(server, config));
     Ok(())
 }
 
-pub fn fully_tag_servers(servers: &mut [ServerObject], config: &Config) -> Result<()> {
+pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) -> Result<()> {
     let mapped_sessions = get_server_sessions_to_living()?;
 
-    servers
-        .iter_mut()
-        .for_each(|server| match mapped_sessions.get(&server.name) {
-            Some(true) => tag_as_active(server),
+    servers.iter_mut().for_each(|server| {
+        match mapped_sessions.get(server.path.to_string_lossy().as_ref()) {
+            Some(true) => server.set_state(ServerState::Active),
             Some(false) => {
                 add_last_used_tag(server, config);
-                tag_as_dead(server);
+                server.set_state(ServerState::Dead);
             }
             None => add_last_used_tag(server, config),
-        });
+        }
+    });
     Ok(())
 }
 

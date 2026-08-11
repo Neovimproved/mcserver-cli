@@ -29,6 +29,18 @@ pub enum ParseConfigError {
     ExpectedChildren(&'static str),
 }
 
+#[derive(Debug, Error)]
+pub enum InvalidServersDirectoryError {
+    #[error("There are seemingly two servers or directories with the name {0}")]
+    DuplicateServer(String),
+
+    #[error("The server {} seems to be missing its parent", .0.display())]
+    MissingParent(PathBuf),
+
+    #[error("The server head of {} seems to be missing", .0.display())]
+    MissingServerHead(PathBuf),
+}
+
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum Error {
@@ -55,8 +67,8 @@ pub enum Error {
     #[error("Invalid server string: {}", .0.display())]
     InvalidServerString(PathBuf),
 
-    #[error("Invalid servers directory")]
-    InvalidServersDirectory,
+    #[error(transparent)]
+    InvalidServersDirectory(#[from] InvalidServersDirectoryError),
 
     #[error("Timestamp file ({0}) is invalid")]
     InvalidTimestampFile(String),
