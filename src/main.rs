@@ -21,15 +21,27 @@ fn main() -> Result<()> {
     let (config, mut document) = config::load_or_create(&config_dir)?;
 
     match args.command {
-        Commands::Alias { alias, server } => {
-            config::add_alias(&mut document, alias, server)?;
-            config::write_document_to_config_file(&document, &config_dir)?
+        Command::Alias { alias, server } => {
+            let Some(alias) = alias else {
+                for (alias, server) in config.aliases {
+                    println!("{alias} -> {server}");
+                }
+
+                return Ok(());
+            };
+
+            if let Some(server) = server {
+                config::add_alias(&mut document, alias, server)?;
+                config::write_document_to_config_file(&document, &config_dir)?
+            } else if let Some(server) = config.aliases.get(&alias) {
+                println!("{alias} aliases {server}");
+            } else {
+                println!("{alias} does not alias anything");
+            }
         }
-        Commands::Attach { server } => {
-            session::attach(handle_server_arg(server, &config)?, &config)
-                .wrap_err("Failed to attach to session session")?
-        }
-        Commands::Completions { shell } => {
+        Command::Attach { server } => session::attach(handle_server_arg(server, &config)?, &config)
+            .wrap_err("Failed to attach to session session")?,
+        Command::Completions { shell } => {
             let cmd = Cli::command();
             generate(
                 shell,
@@ -38,24 +50,24 @@ fn main() -> Result<()> {
                 &mut std::io::stdout(),
             );
         }
-        Commands::Config { config_type } => {
+        Command::Config { config_type } => {
             if config_type.is_some() {
                 config::edit_config_file(&config_dir)?
             } else {
                 println!("{config:#?}")
             }
         }
-        Commands::DeleteAllSessions { force } => if force {
+        Command::DeleteAllSessions { force } => if force {
             session::delete_all()
         } else {
             session::delete_all_confirmed()
         }
         .wrap_err("Failed to delete all sessions")?,
-        Commands::DeleteSession { session, force } => {
+        Command::DeleteSession { session, force } => {
             session::delete_server_session(handle_server_arg(session, &config)?, force)
                 .wrap_err("Failed to delete session")?
         }
-        Commands::Deploy { server } => {
+        Command::Deploy { server } => {
             let server = handle_server_arg(server, &config)?;
             session::new_server(
                 &server,
@@ -63,13 +75,13 @@ fn main() -> Result<()> {
                 &config,
             )?;
         }
-        Commands::Execute { server, commands } => {
+        Command::Execute { server, commands } => {
             let session_name = session::get_name(handle_server_arg(server, &config)?);
             for command in commands {
                 session::write_line(&session_name, command)?;
             }
         }
-        Commands::List {
+        Command::List {
             active,
             inactive,
             dead,
@@ -109,29 +121,29 @@ fn main() -> Result<()> {
                 )
             }
         }
-        Commands::Rcon { server, commands } => {
+        Command::Rcon { server, commands } => {
             server::rcon(handle_server_arg(server, &config)?, commands, &config)
                 .wrap_err("Failed to run rcon command")?
         }
-        Commands::New {
+        Command::New {
             platform,
             version,
             name,
         } => server::create_new(platform, version, name, &config)
             .wrap_err(format!("Failed to create {platform} server"))?,
-        Commands::Remove { servers, force } => if force {
+        Command::Remove { servers, force } => if force {
             server::remove_servers(servers, &config)
         } else {
             server::remove_servers_with_confirmation(servers, &config)
         }
         .wrap_err("Failed to remove server")?,
-        Commands::Restart => server::restart(&config).wrap_err("Failed to restart server")?,
-        Commands::Stop { server } => {
+        Command::Restart => server::restart(&config).wrap_err("Failed to restart server")?,
+        Command::Stop { server } => {
             let server = handle_server_arg(server, &config)?;
             server::rcon(&server, vec!["stop"], &config)
                 .wrap_err_with(|| format!("Failed to stop server {}", server))?;
         }
-        Commands::Template { action } => match action {
+        Command::Template { action } => match action {
             TemplateCommands::New { server } => server::new_template(&server, &config)
                 .wrap_err_with(|| format!("Failed to create template with server {server}"))?,
             TemplateCommands::From { template, server } => {
@@ -139,7 +151,7 @@ fn main() -> Result<()> {
                     .wrap_err_with(|| format!("Failed to use template {template}"))?
             }
         },
-        Commands::Reinstall {
+        Command::Reinstall {
             git,
             commit,
             path,
@@ -157,7 +169,7 @@ fn main() -> Result<()> {
                 unreachable!("Clap ensures git or a path is provided")
             }
         }
-        Commands::Update {
+        Command::Update {
             server,
             platform,
             version,

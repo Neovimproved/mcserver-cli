@@ -7,19 +7,19 @@ use clap_complete::Shell;
 #[command(name = "mcserver", version, about = "Minecraft server CLI tool")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Command,
 }
 
 #[non_exhaustive]
 #[derive(Subcommand)]
-pub enum Commands {
+pub enum Command {
     #[command(about = "Create an alias")]
     Alias {
         #[arg()]
-        alias: String,
+        alias: Option<String>,
 
         #[arg()]
-        server: String,
+        server: Option<String>,
     },
 
     #[command(visible_alias = "a", about = "Attach to a server session")]
