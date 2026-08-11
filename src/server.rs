@@ -939,7 +939,7 @@ pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Con
 }
 
 pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) -> Result<()> {
-    let mapped_sessions = dbg!(get_server_sessions_to_living())?;
+    let mapped_sessions = get_server_sessions_to_living()?;
 
     servers.iter_mut().for_each(|server| {
         match mapped_sessions.get(

@@ -9,7 +9,7 @@ use kdl::KdlError;
 use reqwest::header;
 use thiserror::Error;
 
-use crate::config::{KdlValueType, NodeContext};
+use crate::config::{KdlValueType, NodeClass, NodeContext};
 
 #[non_exhaustive]
 #[derive(Debug, Error)]
@@ -26,7 +26,7 @@ pub enum ParseConfigError {
     // #[error("Expected field {0}")]
     // ExpectedField(&'static str),
     #[error("Expected {0} to have children")]
-    ExpectedChildren(&'static str),
+    ExpectedChildren(NodeClass),
 }
 
 #[derive(Debug, Error)]

@@ -358,7 +358,7 @@ fn transform_number<T, E>(
 fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), ParseConfigError> {
     let children = node
         .children()
-        .ok_or(ParseConfigError::ExpectedChildren("rcon"))?;
+        .ok_or(ParseConfigError::ExpectedChildren(NodeClass::Rcon))?;
 
     let rcon_config = RconConfig {
         server_address: children
@@ -455,20 +455,37 @@ pub fn load_or_create(config_directory: &Path) -> Result<(Config, KdlDocument)> 
     Ok((parse_config(&document)?, document))
 }
 
-pub fn add_alias(document: &mut KdlDocument, alias: String, server: String) -> Result<()> {
-    if alias.len() > server.len() {
+fn transform_to_kdl_string(raw_str: &str) -> String {
+    for ch in raw_str.chars() {
+        if !ch.is_alphabetic() {
+            return format!("\"{}\"", raw_str.replace('"', "\\\""));
+        }
+    }
+
+    raw_str.to_string()
+}
+
+pub fn add_alias(document: &mut KdlDocument, alias: &str, server: &str) -> Result<()> {
+    if alias.len() > server.len() && alias != "default" {
         println!("You are smart");
     }
 
+    let kdl_alias = transform_to_kdl_string(alias);
+    let kdl_server = transform_to_kdl_string(server);
+
     if let Some(aliases_node) = document.get_mut("aliases") {
-        aliases_node
+        let children = aliases_node
             .children_mut()
             .as_mut()
-            .expect("Expected children")
-            .nodes_mut()
-            .push(KdlNode::parse(&format!("    {alias} {server}\n"))?);
+            .ok_or(ParseConfigError::ExpectedChildren(NodeClass::Aliases))?;
 
-        println!("Alias {alias} added (references {server}");
+        // Remove existing alias(es) with the same name
+        children.nodes_mut().retain(|c| c.name().value() != alias);
+
+        children.nodes_mut().push(KdlNode::parse(&format!(
+            "    {} {}\n",
+            kdl_alias, kdl_server,
+        ))?);
 
         return Ok(());
     }
@@ -505,8 +522,10 @@ pub fn add_alias(document: &mut KdlDocument, alias: String, server: String) -> R
     nodes.insert(
         idx,
         KdlNode::parse(&format!(
-            "{}aliases {{\n    {alias} {server}\n}}{}",
+            "{}aliases {{\n    {} {}\n}}{}",
             "\n".repeat(leading_newlines_needed),
+            kdl_alias,
+            kdl_server,
             "\n".repeat(trailing_newlines_needed)
         ))?,
     );

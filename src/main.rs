@@ -31,8 +31,9 @@ fn main() -> Result<()> {
             };
 
             if let Some(server) = server {
-                config::add_alias(&mut document, alias, server)?;
-                config::write_document_to_config_file(&document, &config_dir)?
+                config::add_alias(&mut document, &alias, &server)?;
+                config::write_document_to_config_file(&document, &config_dir)?;
+                println!("Alias `{alias}` now references `{server}`");
             } else if let Some(server) = config.aliases.get(&alias) {
                 println!("{alias} aliases {server}");
             } else {
