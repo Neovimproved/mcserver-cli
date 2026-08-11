@@ -1,6 +1,3 @@
-// Used for the default http header value (for sites that require them, such as the fabric api)
-contact "none"
-
 // The default arguments passed to the java command when the jar is run
 default_java_args {
     "-Xms2G"
