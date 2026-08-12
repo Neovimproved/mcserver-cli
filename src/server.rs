@@ -1,4 +1,6 @@
 use std::{
+    borrow::Cow,
+    cmp::Ordering,
     collections::{HashMap, HashSet, hash_map::Entry},
     env,
     ffi::OsStr,
@@ -35,7 +37,7 @@ pub const METADATA_DIRECTORY_NAME: &str = ".mcserver";
 const JAR_FILE_TXT_NAME: &str = "jar_file.txt";
 const LAST_USED_FILE: &str = "last_used.timestamp";
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum LastUsed {
     Never,
     Unknown,
@@ -52,7 +54,7 @@ impl Display for LastUsed {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum ServerState {
     Active,
     Dead,
@@ -71,7 +73,7 @@ impl Display for ServerState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 struct ServerTags {
     last_used: Option<LastUsed>,
     state: Option<ServerState>,
@@ -100,10 +102,28 @@ impl Display for ServerTags {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct AbsoluteServerObject {
     path: PathBuf,
     tags: ServerTags,
+}
+
+impl PartialEq for AbsoluteServerObject {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl PartialOrd for AbsoluteServerObject {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AbsoluteServerObject {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.path.cmp(&other.path)
+    }
 }
 
 impl Display for AbsoluteServerObject {
@@ -196,19 +216,33 @@ pub struct ServerDirectory {
     #[allow(unused)]
     name: String,
     children: HashMap<String, ServerTreeNode>,
+    descendant_dir_count: usize,
+    descendant_server_count: usize,
 }
 
 impl ServerDirectory {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            children: HashMap::new(),
+            descendant_dir_count: 0,
+            descendant_server_count: 0,
+        }
+    }
+
     fn insert(
         &mut self,
         obj: RelativeServerObject,
     ) -> result::Result<(), InvalidServersDirectoryError> {
         match obj.unwrap_layer()? {
             ServerUnwrapResult::Finished(named_server_object) => {
-                self.add_object(named_server_object)?
+                self.add_object(named_server_object)?;
+                self.descendant_server_count += 1;
             }
             ServerUnwrapResult::Relative(directory, relative_server_object) => {
-                self.nest_object(directory, relative_server_object)?
+                self.nest_object(directory, relative_server_object)?;
+                self.descendant_dir_count += 1;
+                self.descendant_server_count += 1;
             }
         };
 
@@ -252,11 +286,7 @@ impl ServerDirectory {
             Entry::Vacant(vacant_entry) => {
                 let name = vacant_entry.key().clone();
 
-                let mut child = ServerDirectory {
-                    name,
-                    children: HashMap::new(),
-                };
-
+                let mut child = ServerDirectory::new(name);
                 child.insert(obj)?;
 
                 vacant_entry.insert(ServerTreeNode::Directory(child));
@@ -275,13 +305,20 @@ pub enum ServerTreeNode {
 }
 
 impl ServerTreeNode {
-    pub fn try_from_flat_objects(objects: Vec<AbsoluteServerObject>) -> Result<Self> {
-        let name = "servers";
+    pub fn try_from_flat_objects(
+        objects: Vec<AbsoluteServerObject>,
+        config: &Config,
+    ) -> Result<Self> {
+        let root_name = config
+            .servers_directory
+            .expand()?
+            .iter()
+            .next_back()
+            .map(OsStr::to_string_lossy)
+            .map(Cow::into_owned)
+            .unwrap_or_else(|| "servers".to_string());
 
-        let mut root = ServerDirectory {
-            name: name.to_string(),
-            children: HashMap::new(),
-        };
+        let mut root = ServerDirectory::new(root_name.to_string());
 
         for obj in objects {
             let path = obj.path;
@@ -350,7 +387,17 @@ impl Display for ServerTreeNode {
         // ├──
         // └──
 
-        self.pretty_fmt(f, "")
+        self.pretty_fmt(f, "")?;
+
+        if let ServerTreeNode::Directory(dir) = self {
+            write!(
+                f,
+                "\n{}, {}",
+                dir.descendant_dir_count, dir.descendant_server_count
+            )
+        } else {
+            write!(f, "Fah")
+        }
     }
 }
 

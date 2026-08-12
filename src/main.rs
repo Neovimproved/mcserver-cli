@@ -111,6 +111,8 @@ fn main() -> Result<()> {
                     .wrap_err("Failed to tag active servers")?;
             }
 
+            servers.sort_unstable();
+
             if flat {
                 for server in servers {
                     println!("{server}");
@@ -118,7 +120,7 @@ fn main() -> Result<()> {
             } else {
                 println!(
                     "{}",
-                    server::ServerTreeNode::try_from_flat_objects(servers)?
+                    server::ServerTreeNode::try_from_flat_objects(servers, &config)?
                 )
             }
         }
