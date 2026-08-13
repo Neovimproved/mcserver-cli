@@ -792,6 +792,7 @@ pub fn restart(config: &Config) -> Result<()> {
         env::var("ZELLIJ_SESSION_NAME")
             .ok()
             .and_then(|session_name| session_name.strip_suffix(session::SUFFIX).map(String::from))
+            .map(resolve_server)
     }) {
         Some(session) => session,
         None => {
