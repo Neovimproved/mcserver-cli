@@ -6,3 +6,4 @@
 - [x] Switch to kdl files (toml bad)
 - [x] Add alias command (edits the config automatically)
 - [ ] Add a server building system
+- [ ] Make deployment and killing more flexible
