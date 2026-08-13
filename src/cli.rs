@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 
 #[derive(Parser)]
@@ -79,19 +79,7 @@ pub enum Command {
     },
 
     #[command(visible_alias = "ls", about = "List all, active or inactive servers")]
-    List {
-        #[arg(short, long, conflicts_with_all = ["inactive", "dead"])]
-        active: bool,
-
-        #[arg(short, long, conflicts_with = "active")]
-        inactive: bool,
-
-        #[arg(short, long, conflicts_with = "inactive")]
-        dead: bool,
-
-        #[arg(short, default_value_t)]
-        flat: bool,
-    },
+    List(ListingArguments),
 
     #[command(about = "Interact with a server, using the minecraft remote console")]
     Rcon {
@@ -153,6 +141,9 @@ pub enum Command {
         action: TemplateCommands,
     },
 
+    #[command(about = "List the servers in a tree")]
+    Tree(ListingArguments),
+
     #[command(about = "Update a server's .jar file and reference")]
     Update {
         server: String,
@@ -173,6 +164,18 @@ pub enum DefaultCommands {
     Get,
 
     Set { server: String },
+}
+
+#[derive(Args, Debug)]
+pub struct ListingArguments {
+    #[arg(short, long, conflicts_with_all = ["inactive", "dead"])]
+    pub active: bool,
+
+    #[arg(short, long, conflicts_with = "active")]
+    pub inactive: bool,
+
+    #[arg(short, long, conflicts_with = "inactive")]
+    pub dead: bool,
 }
 
 #[derive(Subcommand)]

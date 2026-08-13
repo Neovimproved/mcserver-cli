@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, HashSet, hash_map::Entry},
     env,
@@ -21,7 +20,7 @@ use reqwest::{
 use url::Url;
 
 use crate::{
-    cli::Platform,
+    cli::{ListingArguments, Platform},
     config::{Config, server_or_current},
     error::{Error, InvalidServersDirectoryError, Result},
     platforms::{self},
@@ -309,14 +308,7 @@ impl ServerTreeNode {
         objects: Vec<AbsoluteServerObject>,
         config: &Config,
     ) -> Result<Self> {
-        let root_name = config
-            .servers_directory
-            .expand()?
-            .iter()
-            .next_back()
-            .map(OsStr::to_string_lossy)
-            .map(Cow::into_owned)
-            .unwrap_or_else(|| "servers".to_string());
+        let root_name = config.servers_directory.expand()?.to_string_lossy();
 
         let mut root = ServerDirectory::new(root_name.to_string());
 
@@ -348,7 +340,7 @@ impl ServerTreeNode {
             }
             Self::Directory(server_directory) => {
                 // println!("For {}", server_directory.name);
-                writeln!(f, "{}", server_directory.name)?;
+                writeln!(f, "\x1b[34m\x1b[1m{}\x1b[0m", server_directory.name)?;
 
                 let next_indentation = format!("{base_indentation}│   ");
                 let last_idx = server_directory.children.iter().len().saturating_sub(1);
@@ -392,7 +384,7 @@ impl Display for ServerTreeNode {
         if let ServerTreeNode::Directory(dir) = self {
             write!(
                 f,
-                "\n{}, {}",
+                "\n\n{} server directories, {} servers",
                 dir.descendant_dir_count, dir.descendant_server_count
             )
         } else {
@@ -583,7 +575,7 @@ pub fn create_new(
 }
 
 pub fn resolve_server(server: String) -> String {
-    server.replace(".", MAIN_SEPARATOR_STR)
+    server.replace('.', MAIN_SEPARATOR_STR)
 }
 
 pub fn update_existing(
@@ -734,6 +726,41 @@ pub fn get_all_hashed(config: &Config) -> Result<HashSet<String>> {
         },
         config,
     )?;
+
+    Ok(servers)
+}
+
+pub fn get_servers_list(
+    listing_arguments: ListingArguments,
+    config: &Config,
+) -> Result<Vec<AbsoluteServerObject>> {
+    let mut servers = vec![];
+
+    for_each(
+        |s| servers.push(AbsoluteServerObject::new(s.to_path_buf())),
+        config,
+    )?;
+
+    let (active, inactive, dead) = (
+        listing_arguments.active,
+        listing_arguments.dead,
+        listing_arguments.inactive,
+    );
+
+    if active {
+        retain_active(&mut servers)?;
+    } else if inactive {
+        retain_and_tag_inactive(&mut servers, config)?;
+        if dead {
+            tag_dead(&mut servers)?;
+        }
+    } else if dead {
+        retain_and_tag_dead(&mut servers, config)?;
+    } else {
+        fully_tag_servers(&mut servers, config)?;
+    }
+
+    servers.sort_unstable();
 
     Ok(servers)
 }

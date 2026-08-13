@@ -23,6 +23,7 @@ fn main() -> Result<()> {
     match args.command {
         Command::Alias { alias, server } => {
             let Some(alias) = alias else {
+                println!("Aliases: ");
                 for (alias, server) in config.aliases {
                     println!("{alias} -> {server}");
                 }
@@ -82,47 +83,15 @@ fn main() -> Result<()> {
                 session::write_line(&session_name, command)?;
             }
         }
-        Command::List {
-            active,
-            inactive,
-            dead,
-            flat,
-        } => {
-            let mut servers = vec![];
-            server::for_each(
-                |s| servers.push(server::AbsoluteServerObject::new(s.to_path_buf())),
-                &config,
-            )
-            .wrap_err("Failed to get servers")?;
+        Command::List(listing_arguments) => {
+            let servers = server::get_servers_list(listing_arguments, &config)
+                .wrap_err("Failed to get servers")?;
 
-            if active {
-                server::retain_active(&mut servers).wrap_err("Failed to retain active servers")?;
-            } else if inactive {
-                server::retain_and_tag_inactive(&mut servers, &config)
-                    .wrap_err("Failed to retain inactive servers")?;
-                if dead {
-                    server::tag_dead(&mut servers).wrap_err("Failed to tag dead servers")?;
-                }
-            } else if dead {
-                server::retain_and_tag_dead(&mut servers, &config)
-                    .wrap_err("Failed to retain dead servers")?;
-            } else {
-                server::fully_tag_servers(&mut servers, &config)
-                    .wrap_err("Failed to tag active servers")?;
+            for server in &servers {
+                println!("{server}");
             }
 
-            servers.sort_unstable();
-
-            if flat {
-                for server in servers {
-                    println!("{server}");
-                }
-            } else {
-                println!(
-                    "{}",
-                    server::ServerTreeNode::try_from_flat_objects(servers, &config)?
-                )
-            }
+            println!("\n{} servers", servers.len());
         }
         Command::Rcon { server, commands } => {
             server::rcon(handle_server_arg(server, &config)?, commands, &config)
@@ -154,6 +123,16 @@ fn main() -> Result<()> {
                     .wrap_err_with(|| format!("Failed to use template {template}"))?
             }
         },
+        Command::Tree(listing_arguments) => {
+            let servers = server::get_servers_list(listing_arguments, &config)
+                .wrap_err("Failed to get servers")?;
+
+            println!(
+                "{}",
+                server::ServerTreeNode::try_from_flat_objects(servers, &config)
+                    .wrap_err("Failed to convert servers into nodes")?
+            );
+        }
         Command::Reinstall {
             git,
             commit,
