@@ -4,7 +4,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 
 #[derive(Parser)]
-#[command(name = "mcserver", version, about = "Minecraft server CLI tool")]
+#[command(name = "mcserver", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
