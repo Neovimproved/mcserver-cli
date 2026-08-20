@@ -5,7 +5,7 @@ use std::{
     ffi::OsStr,
     fmt::{self, Display, Formatter},
     fs::{self, File},
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
     os::unix::fs::PermissionsExt,
     path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf},
     process::Command,
@@ -43,12 +43,42 @@ pub enum LastUsed {
     Time(String),
 }
 
+#[derive(Debug)]
+struct Colorize<T: Display> {
+    value: T,
+    sequence: &'static str,
+}
+
+impl<T: Display> Display for Colorize<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if io::stdout().is_terminal() {
+            write!(f, "\x1b{}{}\x1b[0m", self.sequence, self.value)
+        } else {
+            write!(f, "{}", self.value)
+        }
+    }
+}
+
 impl Display for LastUsed {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            LastUsed::Never => write!(f, "(Last used \x1b[35;1mnever\x1b[0m)"),
+            LastUsed::Never => write!(
+                f,
+                "(Last used {})",
+                Colorize {
+                    value: "never",
+                    sequence: "[35;1m"
+                }
+            ),
             LastUsed::Unknown => write!(f, "(Last used unknown)"),
-            LastUsed::Time(time) => write!(f, "(Last used \x1b[35;1m{time}\x1b[0m ago)"),
+            LastUsed::Time(time) => write!(
+                f,
+                "(Last used {} ago)",
+                Colorize {
+                    value: time,
+                    sequence: "[35;1m"
+                }
+            ),
         }
     }
 }
@@ -63,10 +93,16 @@ impl Display for ServerState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}",
+            "({})",
             match self {
-                ServerState::Active => "(\x1b[32;1mactive\x1b[0m)",
-                ServerState::Dead => "(\x1b[31;1mdead\x1b[0m)",
+                ServerState::Active => Colorize {
+                    value: "active",
+                    sequence: "[32;1m",
+                },
+                ServerState::Dead => Colorize {
+                    value: "dead",
+                    sequence: "[31;1m",
+                },
             }
         )
     }
@@ -340,7 +376,14 @@ impl ServerTreeNode {
             }
             Self::Directory(server_directory) => {
                 // println!("For {}", server_directory.name);
-                writeln!(f, "\x1b[34m\x1b[1m{}\x1b[0m", server_directory.name)?;
+                writeln!(
+                    f,
+                    "{}",
+                    Colorize {
+                        value: &server_directory.name,
+                        sequence: "[34;1m"
+                    },
+                )?;
 
                 let next_indentation = format!("{base_indentation}│   ");
                 let last_idx = server_directory.children.iter().len().saturating_sub(1);
@@ -349,10 +392,10 @@ impl ServerTreeNode {
                     write!(f, "{base_indentation}")?;
 
                     if idx == last_idx {
-                        write!(f, "└──")?;
+                        write!(f, "└── ")?;
                         value.pretty_fmt(f, &format!("{base_indentation}    "))?;
                     } else {
-                        write!(f, "├──")?;
+                        write!(f, "├── ")?;
                         value.pretty_fmt(f, &next_indentation)?;
                         writeln!(f)?;
                     }
@@ -384,8 +427,19 @@ impl Display for ServerTreeNode {
         if let ServerTreeNode::Directory(dir) = self {
             write!(
                 f,
-                "\n\n{} server directories, {} servers",
-                dir.descendant_dir_count, dir.descendant_server_count
+                "\n\n{} {}, {} {}",
+                dir.descendant_dir_count,
+                if dir.descendant_dir_count == 1 {
+                    "directory"
+                } else {
+                    "directories"
+                },
+                dir.descendant_server_count,
+                if dir.descendant_server_count == 1 {
+                    "server"
+                } else {
+                    "servers"
+                }
             )
         } else {
             write!(f, "Fah")
