@@ -628,7 +628,7 @@ pub fn create_new(
     Ok(())
 }
 
-pub fn resolve_server(server: String) -> String {
+pub fn resolve_server_path_from_session(server: String) -> String {
     server.replace('.', MAIN_SEPARATOR_STR)
 }
 
@@ -640,7 +640,8 @@ pub fn update_existing(
 ) -> Result<()> {
     let download_url = platforms::get(platform, version)?;
 
-    let server_dir = PathBuf::from(config.servers_directory.expand()?).join(resolve_server(server));
+    let server_dir = PathBuf::from(config.servers_directory.expand()?)
+        .join(resolve_server_path_from_session(server));
 
     let (jar, jar_file_name) = get_jar(download_url, platform)?;
     copy_jar(&server_dir, &jar_file_name, jar)?;
@@ -819,8 +820,14 @@ pub fn get_servers_list(
     Ok(servers)
 }
 
-pub fn resolve_server_dir(server: impl AsRef<Path>, config: &Config) -> Result<PathBuf> {
-    let server_dir = config.servers_directory.expand()?.join(server);
+pub fn resolve_absolute_server_dir(
+    relative_server_path: impl AsRef<Path>,
+    config: &Config,
+) -> Result<PathBuf> {
+    let server_dir = config
+        .servers_directory
+        .expand()?
+        .join(relative_server_path);
 
     if !server_dir.is_dir() {
         return Err(Error::MissingDirectory(server_dir));
@@ -855,7 +862,7 @@ pub fn get_command(server: impl AsRef<str>, config: &Config) -> Result<String> {
         return Err(Error::TemplateDeployed);
     }
 
-    let server_dir = resolve_server_dir(server, config)?;
+    let server_dir = resolve_absolute_server_dir(server, config)?;
 
     Ok(format!(
         "export SERVER_NAME={server} && {} action rename-tab Server && cd {} && while :; do java -jar {} {} {} && {}; done",
@@ -873,7 +880,7 @@ pub fn restart(config: &Config) -> Result<()> {
         env::var("ZELLIJ_SESSION_NAME")
             .ok()
             .and_then(|session_name| session_name.strip_suffix(session::SUFFIX).map(String::from))
-            .map(resolve_server)
+            .map(resolve_server_path_from_session)
     }) {
         Some(session) => session,
         None => {
