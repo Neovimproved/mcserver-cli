@@ -292,7 +292,7 @@ impl ServerDirectory {
         match self.children.entry(obj.name.clone()) {
             Entry::Occupied(occupied) => {
                 return Err(InvalidServersDirectoryError::DuplicateServer(
-                    occupied.key().clone(),
+                    occupied.key().to_owned(),
                 ));
             }
             Entry::Vacant(vacant_entry) => {
@@ -320,7 +320,7 @@ impl ServerDirectory {
                 }
             },
             Entry::Vacant(vacant_entry) => {
-                let name = vacant_entry.key().clone();
+                let name = vacant_entry.key().to_owned();
 
                 let mut child = ServerDirectory::new(name);
                 child.insert(obj)?;
@@ -1112,8 +1112,13 @@ pub fn rcon<T: AsRef<OsStr>>(
 ) -> Result<()> {
     let rcon_config = &config.rcon;
 
+    for (k, v) in rcon_config.iter() {
+        println!("{:?}: {v:?}", k.chars().next());
+    }
+
     let server_rcon_config = rcon_config
         .get(server.as_ref())
+        .or_else(|| rcon_config.get(&format!("\"{}\"", server.as_ref())))
         .ok_or_else(|| Error::MissingRconConfig(server.as_ref().to_string()))?;
 
     let mut command = Command::new("mcrcon");
