@@ -21,7 +21,10 @@ pub const SUFFIX: &str = ".mcserver";
 pub const TIMER: &str = "for i in {3..1}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done";
 
 pub fn path_str_to_session(server_path: impl AsRef<str>) -> String {
-    format!("{}", server_path.as_ref().replace(MAIN_SEPARATOR, "."))
+    format!(
+        "{}{SUFFIX}",
+        server_path.as_ref().replace(MAIN_SEPARATOR, ".")
+    )
 }
 
 /// Get the session name of the server path
