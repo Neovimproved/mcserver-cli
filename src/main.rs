@@ -78,7 +78,7 @@ fn main() -> Result<()> {
             )?;
         }
         Command::Execute { server, commands } => {
-            let session_name = session::get_name(handle_server_arg(server, &config)?);
+            let session_name = session::path_str_to_session(handle_server_arg(server, &config)?);
             for command in commands {
                 session::write_line(&session_name, command)?;
             }

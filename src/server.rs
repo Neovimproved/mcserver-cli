@@ -7,7 +7,7 @@ use std::{
     fs::{self, File},
     io::{self, IsTerminal, Write},
     os::unix::fs::PermissionsExt,
-    path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf},
+    path::{MAIN_SEPARATOR_STR, Path, PathBuf},
     process::Command,
     result,
     time::{SystemTime, UNIX_EPOCH},
@@ -26,6 +26,7 @@ use crate::{
     platforms::{self},
     session::{
         self, get_alive_server_sessions, get_dead_server_sessions, get_server_sessions_to_living,
+        path_str_to_session, path_to_session,
     },
 };
 
@@ -896,7 +897,7 @@ pub fn restart(config: &Config) -> Result<()> {
     save_last_used_now(&server_name, config)?;
 
     session::write_line(
-        session::get_name(&server_name),
+        path_str_to_session(&server_name),
         get_command(&server_name, config)?,
     )
 }
@@ -1027,10 +1028,12 @@ pub fn reinstall_with_crate() -> io::Result<()> {
 }
 
 pub fn tag_dead(servers: &mut [AbsoluteServerObject]) -> Result<()> {
-    let sessions = get_alive_server_sessions()?;
+    let sessions = get_dead_server_sessions()?;
 
     servers.iter_mut().for_each(|server| {
-        if sessions.contains(server.path.to_string_lossy().as_ref()) {
+        if let Some(session) = path_to_session(&server.path)
+            && sessions.contains(&session)
+        {
             server.set_state(ServerState::Dead);
         }
     });
@@ -1065,7 +1068,14 @@ pub fn retain_and_tag_inactive(
 
 pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Config) -> Result<()> {
     let dead_sessions = get_dead_server_sessions()?;
-    servers.retain(|server| dead_sessions.contains(server.path.to_string_lossy().as_ref()));
+
+    servers.retain(|server| {
+        if let Some(session) = path_to_session(&server.path) {
+            dead_sessions.contains(&session)
+        } else {
+            false
+        }
+    });
 
     servers
         .iter_mut()
@@ -1076,13 +1086,10 @@ pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Con
 pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) -> Result<()> {
     let mapped_sessions = get_server_sessions_to_living()?;
 
-    servers.iter_mut().for_each(|server| {
+    servers.iter_mut().try_for_each(|server| -> Result<()> {
         match mapped_sessions.get(
-            &server
-                .path
-                .to_string_lossy()
-                .as_ref()
-                .replace(MAIN_SEPARATOR, "."),
+            &path_to_session(&server.path)
+                .ok_or_else(|| Error::InvalidServerString(server.path.to_path_buf()))?,
         ) {
             Some(true) => server.set_state(ServerState::Active),
             Some(false) => {
@@ -1090,8 +1097,11 @@ pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) 
                 server.set_state(ServerState::Dead);
             }
             None => add_last_used_tag(server, config),
-        }
-    });
+        };
+
+        Ok(())
+    })?;
+
     Ok(())
 }
 

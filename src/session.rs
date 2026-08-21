@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     io::{self, Read, Write},
-    path::MAIN_SEPARATOR,
+    path::{MAIN_SEPARATOR, Path},
     process::{Command, Stdio},
     thread,
     time::Duration,
@@ -20,9 +20,15 @@ pub const SUFFIX: &str = ".mcserver";
 
 pub const TIMER: &str = "for i in {3..1}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done";
 
-/// Get the session name of the server
-pub fn get_name(server: impl AsRef<str>) -> String {
-    format!("{}{SUFFIX}", server.as_ref().replace(MAIN_SEPARATOR, "."))
+pub fn path_str_to_session(server_path: impl AsRef<str>) -> String {
+    format!("{}", server_path.as_ref().replace(MAIN_SEPARATOR, "."))
+}
+
+/// Get the session name of the server path
+pub fn path_to_session(server_path: impl AsRef<Path>) -> Option<String> {
+    Some(path_str_to_session(
+        server_path.as_ref().to_str()?.replace(MAIN_SEPARATOR, "."),
+    ))
 }
 
 fn get_server_sessions_raw_string() -> Result<Option<String>> {
@@ -101,7 +107,7 @@ pub fn attach(server: impl AsRef<str>, config: &Config) -> Result<()> {
     let server = server.as_ref();
     let mut child = Command::new(BASE_COMMAND)
         .arg("attach")
-        .arg(get_name(server))
+        .arg(path_str_to_session(server))
         .stderr(Stdio::piped())
         .spawn()?;
 
@@ -159,7 +165,7 @@ pub fn new_server(
     config: &Config,
 ) -> Result<()> {
     save_last_used_now(server, config)?;
-    let session_name = get_name(server);
+    let session_name = path_str_to_session(server);
     new_session(session_name, initial_command)?;
     save_last_used_now(server, config)
 }
@@ -167,7 +173,7 @@ pub fn new_server(
 pub fn delete_server_session(server: impl AsRef<str>, force: bool) -> Result<()> {
     let mut command = Command::new(BASE_COMMAND);
     command.arg("delete-session");
-    command.arg(get_name(server));
+    command.arg(path_str_to_session(server));
 
     if force {
         command.arg("--force");
@@ -249,7 +255,8 @@ mod test {
     #[test]
     fn session_name() {
         assert_eq!(
-            get_name(PathBuf::from("testing").join("test").to_string_lossy()),
+            path_to_session(PathBuf::from("testing").join("test"))
+                .expect("Expected session to be created"),
             format!("testing.test{SUFFIX}")
         );
     }
