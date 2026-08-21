@@ -209,14 +209,15 @@ trait KdlNodeExt {
 
 impl KdlNodeExt for KdlNode {
     fn get_value(&self) -> result::Result<&KdlValue, ParseConfigError> {
-        self.get(0)
-            .ok_or_else(|| ParseConfigError::ExpectedValue(NodeContext::new(self.name().clone())))
+        self.get(0).ok_or_else(|| {
+            ParseConfigError::ExpectedValue(NodeContext::new(self.name().to_owned()))
+        })
     }
 
     fn get_string_value(&self) -> result::Result<&str, ParseConfigError> {
         self.get_value()?.as_string().ok_or_else(|| {
             ParseConfigError::InvalidType(
-                NodeContext::new(self.name().clone()),
+                NodeContext::new(self.name().to_owned()),
                 KdlValueType::String,
             )
         })
@@ -225,7 +226,7 @@ impl KdlNodeExt for KdlNode {
     fn get_integer_value(&self) -> result::Result<i128, ParseConfigError> {
         self.get_value()?.as_integer().ok_or_else(|| {
             ParseConfigError::InvalidType(
-                NodeContext::new(self.name().clone()),
+                NodeContext::new(self.name().to_owned()),
                 KdlValueType::Integer,
             )
         })
@@ -234,7 +235,7 @@ impl KdlNodeExt for KdlNode {
     fn get_float_value(&self) -> result::Result<f64, ParseConfigError> {
         self.get_value()?.as_float().ok_or_else(|| {
             ParseConfigError::InvalidType(
-                NodeContext::new(self.name().clone()),
+                NodeContext::new(self.name().to_owned()),
                 KdlValueType::Float,
             )
         })
@@ -242,7 +243,10 @@ impl KdlNodeExt for KdlNode {
 
     fn get_bool_value(&self) -> result::Result<bool, ParseConfigError> {
         self.get_value()?.as_bool().ok_or_else(|| {
-            ParseConfigError::InvalidType(NodeContext::new(self.name().clone()), KdlValueType::Bool)
+            ParseConfigError::InvalidType(
+                NodeContext::new(self.name().to_owned()),
+                KdlValueType::Bool,
+            )
         })
     }
 
@@ -252,7 +256,7 @@ impl KdlNodeExt for KdlNode {
     ) -> result::Result<&KdlValue, ParseConfigError> {
         self.get(0).ok_or_else(|| {
             ParseConfigError::ExpectedValue(NodeContext::with_parent_class(
-                self.name().clone(),
+                self.name().to_owned(),
                 parent_class,
             ))
         })
@@ -266,7 +270,7 @@ impl KdlNodeExt for KdlNode {
             .as_string()
             .ok_or_else(|| {
                 ParseConfigError::InvalidType(
-                    NodeContext::new(self.name().clone()),
+                    NodeContext::new(self.name().to_owned()),
                     KdlValueType::String,
                 )
             })
@@ -280,7 +284,7 @@ impl KdlNodeExt for KdlNode {
             .as_integer()
             .ok_or_else(|| {
                 ParseConfigError::InvalidType(
-                    NodeContext::new(self.name().clone()),
+                    NodeContext::new(self.name().to_owned()),
                     KdlValueType::Integer,
                 )
             })
@@ -294,7 +298,7 @@ impl KdlNodeExt for KdlNode {
             .as_float()
             .ok_or_else(|| {
                 ParseConfigError::InvalidType(
-                    NodeContext::new(self.name().clone()),
+                    NodeContext::new(self.name().to_owned()),
                     KdlValueType::Float,
                 )
             })
@@ -308,7 +312,7 @@ impl KdlNodeExt for KdlNode {
             .as_bool()
             .ok_or_else(|| {
                 ParseConfigError::InvalidType(
-                    NodeContext::new(self.name().clone()),
+                    NodeContext::new(self.name().to_owned()),
                     KdlValueType::Bool,
                 )
             })
@@ -338,7 +342,7 @@ fn parse_alias(node: &KdlNode) -> result::Result<(String, String), ParseConfigEr
         .get_nested_string_value(NodeClass::Aliases)?
         .to_string();
 
-    Ok((node.name().to_string(), reference))
+    Ok((node.name().value().to_string(), reference))
 }
 
 fn transform_number<T, E>(
@@ -379,7 +383,7 @@ fn parse_rcon_config(node: &KdlNode) -> result::Result<(String, RconConfig), Par
             .map(|value| Password(value.to_string())),
     };
 
-    Ok((node.name().to_string(), rcon_config))
+    Ok((node.name().value().to_string(), rcon_config))
 }
 
 fn parse_config(document: &KdlDocument) -> Result<Config> {
@@ -387,7 +391,7 @@ fn parse_config(document: &KdlDocument) -> Result<Config> {
         .get("default_java_args")
         .map(|node| {
             node.iter_children()
-                .map(|child_node| child_node.name().to_string())
+                .map(|child_node| format!("\"{}\"", child_node.name().value()))
                 .collect()
         })
         .unwrap_or_default();
@@ -543,7 +547,7 @@ pub fn get_current_server_directory(servers_dir: &Path) -> Result<String> {
 
         server_path = server_path
             .parent()
-            .ok_or_else(|| InvalidServersDirectoryError::MissingParent(server_path.clone()))?
+            .ok_or_else(|| InvalidServersDirectoryError::MissingParent(server_path.to_owned()))?
             .to_path_buf();
     }
 
