@@ -7,8 +7,17 @@
 
   outputs =
     { self, nixpkgs }:
+    let
+      lib = nixpkgs.lib;
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+    in
     {
-      packages = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "hello-linux" ] (
+      packages = lib.genAttrs supportedSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
@@ -18,7 +27,7 @@
             pname = "mcserver";
             version = "0.2.3";
             cargoLock.lockFile = ./Cargo.lock;
-            src = pkgs.lib.cleanSource ./.;
+            src = lib.cleanSource ./.;
 
             nativeBuildInputs = with pkgs; [
               pkg-config
@@ -32,13 +41,13 @@
         }
       );
 
-      devShells = nixpkgs.lib.genAttrs [ "x86-64_linux" "aarch64-linux" "hello-linux" ] (
+      devShells = lib.genAttrs supportedSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
         {
-          default = {
+          default = pkgs.mkShell {
             # A recent stable rust toolchain will be added
             inputsFrom = [ self.packages.${system}.default ];
 
