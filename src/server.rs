@@ -797,8 +797,8 @@ pub fn get_servers_list(
 
     let (active, inactive, dead) = (
         listing_arguments.active,
-        listing_arguments.dead,
         listing_arguments.inactive,
+        listing_arguments.dead,
     );
 
     if active {
