@@ -606,14 +606,30 @@ pub fn get_jar(download_url: Url, platform: Platform) -> Result<(Response, Strin
 pub fn create_new(
     platform: Platform,
     version: Option<String>,
-    name: Option<impl Display>,
+    name: Option<&str>,
     config: &Config,
 ) -> Result<()> {
     let download_url = platforms::get(platform, version)?;
 
     let server_dir = match name {
-        Some(name) => get_first_server_path(name, config)?,
-        None => get_first_server_path(format!("{platform}-server"), config)?,
+        Some(name) => {
+            let path = config.servers_directory.expand()?.join(name);
+
+            if path.exists() {
+                if path.join(METADATA_DIRECTORY_NAME).exists() {
+                    eprint!("A server already exists at {}", path.display());
+                } else if path.is_dir() {
+                    eprintln!("A directory already exists at {}", path.display());
+                } else {
+                    eprintln!("Something already exists at {}", path.display());
+                }
+
+                return Ok(());
+            }
+
+            path
+        }
+        None => get_first_server_path(&format!("{platform}-server"), config)?,
     };
 
     fs::create_dir_all(&server_dir)?;
@@ -931,9 +947,9 @@ pub fn new_template(server: impl AsRef<str>, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn get_first_server_path(name: impl Display, config: &Config) -> Result<PathBuf> {
+fn get_first_server_path(name: &str, config: &Config) -> Result<PathBuf> {
     let servers_dir = config.servers_directory.expand()?;
-    let path = servers_dir.join(format!("{name}"));
+    let path = servers_dir.join(name);
 
     if !path.exists() {
         return Ok(path);

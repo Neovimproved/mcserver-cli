@@ -101,7 +101,7 @@ fn main() -> Result<()> {
             platform,
             version,
             name,
-        } => server::create_new(platform, version, name, &config)
+        } => server::create_new(platform, version, name.as_deref(), &config)
             .wrap_err(format!("Failed to create {platform} server"))?,
         Command::Remove { servers, force } => if force {
             server::remove_servers(servers, &config)
