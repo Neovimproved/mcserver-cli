@@ -372,7 +372,7 @@ impl ServerTreeNode {
     fn pretty_fmt(&self, f: &mut Formatter<'_>, base_indentation: &str) -> fmt::Result {
         match self {
             Self::Child(named_server_object) => {
-                write!(f, "{named_server_object}")
+                writeln!(f, "{named_server_object}")
             }
             Self::Directory(server_directory) => {
                 // println!("For {}", server_directory.name);
@@ -397,7 +397,6 @@ impl ServerTreeNode {
                     } else {
                         write!(f, "├── ")?;
                         value.pretty_fmt(f, &next_indentation)?;
-                        writeln!(f)?;
                     }
                 }
 
@@ -427,7 +426,7 @@ impl Display for ServerTreeNode {
         if let ServerTreeNode::Directory(dir) = self {
             write!(
                 f,
-                "\n\n{} {}, {} {}",
+                "\n{} {}, {} {}",
                 dir.descendant_dir_count,
                 if dir.descendant_dir_count == 1 {
                     "directory"
