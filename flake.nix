@@ -26,6 +26,7 @@
 
             buildInputs = with pkgs; [
               openssl
+              mcrcon
             ];
           };
         }
