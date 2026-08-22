@@ -617,6 +617,7 @@ pub fn handle_server_arg(server: Option<String>, config: &Config) -> Result<Stri
 #[cfg(test)]
 mod test {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn paths() {
@@ -627,6 +628,10 @@ mod test {
             &get_directory().expect("Failed to get config directory"),
             &expected_config_dir
         );
+    }
+
+    fn test_str_transformed_and_parsed(s: &str) {
+        KdlNode::parse(&transform_to_kdl_string(s)).expect("Expected parse success");
     }
 
     #[test]
@@ -640,6 +645,18 @@ mod test {
             .expect("Failed to transform number"),
             69
         );
+
+        assert_eq!(transform_to_kdl_string("0.1"), "\"0.1\"");
+
+        assert_eq!(
+            transform_to_kdl_string("a-w+o-d+j-o+i-d+j-o+i-a+w-d"),
+            "a-w+o-d+j-o+i-d+j-o+i-a+w-d"
+        );
+
+        test_str_transformed_and_parsed("hello\nworld");
+        test_str_transformed_and_parsed("1.7");
+        test_str_transformed_and_parsed("{}0#");
+        test_str_transformed_and_parsed("bye bye-\r69420");
     }
 
     #[test]
@@ -653,5 +670,14 @@ mod test {
             (parsed_alias.0.as_str(), parsed_alias.1.as_str()),
             ("default", "my-server")
         );
+    }
+
+    #[test]
+    fn file_parsing() {
+        let dir = tempdir().expect("Unable to create a temporary directory for testing");
+
+        let path = dir.path();
+
+        load_or_create(path).expect("Failed to create default config");
     }
 }
