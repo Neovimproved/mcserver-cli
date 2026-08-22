@@ -1,6 +1,6 @@
 [package]
 name = "mcserver"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "A command line interface that simplifies minecraft server management with zellij and mcrcon"
 license = "MIT"
