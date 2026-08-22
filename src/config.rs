@@ -459,10 +459,44 @@ pub fn load_or_create(config_directory: &Path) -> Result<(Config, KdlDocument)> 
     Ok((parse_config(&document)?, document))
 }
 
+fn quote_protect_kdl_str(s: &str) -> String {
+    let mut buf = '"'.to_string();
+
+    for ch in s.chars() {
+        match ch {
+            '"' => buf.push_str("\\\""),
+            '\n' => buf.push_str("\\n"),
+            '\r' => buf.push_str("\\r"),
+            x => buf.push(x),
+        }
+    }
+
+    buf.push('"');
+
+    buf
+}
+
+fn check_char_needs_quotes(ch: char) -> bool {
+    matches!(
+        ch,
+        '(' | ')' | '{' | '}' | '[' | ']' | '/' | '\\' | '"' | '#' | ';' | '=' | '\n' | '\r'
+    )
+}
+
 fn transform_to_kdl_string(raw_str: &str) -> String {
-    for ch in raw_str.chars() {
-        if !ch.is_alphabetic() {
-            return format!("\"{}\"", raw_str.replace('"', "\\\""));
+    let mut chars = raw_str.chars();
+
+    let Some(first) = chars.next() else {
+        return "".to_string();
+    };
+
+    if check_char_needs_quotes(first) || first.is_ascii_digit() || matches!(first, '.' | '-') {
+        return quote_protect_kdl_str(raw_str);
+    }
+
+    for ch in chars {
+        if check_char_needs_quotes(ch) {
+            return quote_protect_kdl_str(raw_str);
         }
     }
 
