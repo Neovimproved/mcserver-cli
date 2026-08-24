@@ -18,7 +18,18 @@ use crate::{
 pub const BASE_COMMAND: &str = "zellij";
 pub const SUFFIX: &str = ".mcserver";
 
-pub const TIMER: &str = "for i in {3..1}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done";
+#[macro_export]
+macro_rules! create_timer {
+    ($secs:expr) => {
+        concat!(
+            "for i in {",
+            $secs,
+            "..1}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done"
+        )
+    };
+}
+
+pub(crate) use create_timer;
 
 pub fn path_str_to_session(server_path: impl AsRef<str>) -> String {
     format!(
@@ -268,7 +279,7 @@ mod test {
     fn wait_cmd() {
         let output = Command::new("bash")
             .arg("-c")
-            .arg(TIMER)
+            .arg(create_timer!(1))
             .output()
             .expect("Failed to run timer command");
 

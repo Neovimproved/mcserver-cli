@@ -887,7 +887,7 @@ pub fn get_command(server: impl AsRef<str>, config: &Config) -> Result<String> {
         config.default_java_args.join(" "),
         get_server_jar_path(&server_dir)?.to_string_lossy(),
         if config.nogui { "nogui" } else { "" },
-        session::TIMER,
+        session::create_timer!(3),
     ))
 }
 
