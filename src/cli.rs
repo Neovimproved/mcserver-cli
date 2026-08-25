@@ -18,7 +18,7 @@ pub enum Command {
         #[arg()]
         alias: Option<String>,
 
-        #[arg()]
+        #[arg(value_hint = ValueHint::DirPath)]
         server: Option<String>,
     },
 
