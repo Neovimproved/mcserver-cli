@@ -37,6 +37,9 @@ pub const METADATA_DIRECTORY_NAME: &str = ".mcserver";
 const JAR_FILE_TXT_NAME: &str = "jar_file.txt";
 const LAST_USED_FILE: &str = "last_used.timestamp";
 
+const MULTIPLEXER_SESSION_NAME_VAR: &str = "ZELLIJ_SESSION_NAME";
+const SERVER_NAME_VAR: &str = "SERVER_NAME";
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum LastUsed {
     Never,
@@ -881,7 +884,7 @@ pub fn get_command(server: impl AsRef<str>, config: &Config) -> Result<String> {
     let server_dir = resolve_absolute_server_dir(server, config)?;
 
     Ok(format!(
-        "export SERVER_NAME={server} && {} action rename-tab Server && cd {} && while :; do java -jar {} {} {} && {}; done",
+        "export {SERVER_NAME_VAR}={server} && {} action rename-tab Server && cd {} && while :; do java -jar {} {} {} && {}; done",
         session::BASE_COMMAND,
         server_dir.to_string_lossy(),
         config.default_java_args.join(" "),
@@ -892,8 +895,8 @@ pub fn get_command(server: impl AsRef<str>, config: &Config) -> Result<String> {
 }
 
 pub fn restart(config: &Config) -> Result<()> {
-    let server_name = match env::var("SERVER_NAME").ok().or_else(|| {
-        env::var("ZELLIJ_SESSION_NAME")
+    let server_name = match env::var(SERVER_NAME_VAR).ok().or_else(|| {
+        env::var(MULTIPLEXER_SESSION_NAME_VAR)
             .ok()
             .and_then(|session_name| session_name.strip_suffix(session::SUFFIX).map(String::from))
             .map(resolve_server_path_from_session)
