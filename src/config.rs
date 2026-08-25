@@ -449,6 +449,7 @@ pub fn load_or_create(config_directory: &Path) -> Result<(Config, KdlDocument)> 
             if err.kind() == io::ErrorKind::NotFound {
                 fs::create_dir_all(config_directory)?;
                 fs::write(&config_file_path, DEFAULT_CONFIG)?;
+                println!("Created default configuration");
                 KdlDocument::parse(DEFAULT_CONFIG)
             } else {
                 return Err(Error::Io(err));
