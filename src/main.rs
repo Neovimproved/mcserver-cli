@@ -32,13 +32,10 @@ fn main() -> Result<()> {
             };
 
             if let Some(server) = server {
-                config::add_alias(
-                    &mut document,
-                    &alias,
-                    &config::server_or_current(&server, &config)?,
-                )?;
+                let resolved_server = config::server_or_current(server, &config)?;
+                config::add_alias(&mut document, &alias, &resolved_server)?;
                 config::write_document_to_config_file(&document, &config_dir)?;
-                println!("Alias `{alias}` now references `{server}`");
+                println!("Alias `{alias}` now references `{resolved_server}`");
             } else if let Some(server) = config.aliases.get(&alias) {
                 println!("{alias} aliases {server}");
             } else {
