@@ -647,7 +647,7 @@ pub fn create_new(
     Ok(())
 }
 
-pub fn resolve_server_path_from_session(server: String) -> String {
+pub fn resolve_server_path_from_session(server: &str) -> String {
     server.replace('.', MAIN_SEPARATOR_STR)
 }
 
@@ -660,7 +660,7 @@ pub fn update_existing(
     let download_url = platforms::get(platform, version)?;
 
     let server_dir = PathBuf::from(config.servers_directory.expand()?)
-        .join(resolve_server_path_from_session(server));
+        .join(resolve_server_path_from_session(&server));
 
     let (jar, jar_file_name) = get_jar(download_url, platform)?;
     copy_jar(&server_dir, &jar_file_name, jar)?;
@@ -898,8 +898,11 @@ pub fn restart(config: &Config) -> Result<()> {
     let server_name = match env::var(SERVER_NAME_VAR).ok().or_else(|| {
         env::var(MULTIPLEXER_SESSION_NAME_VAR)
             .ok()
-            .and_then(|session_name| session_name.strip_suffix(session::SUFFIX).map(String::from))
-            .map(resolve_server_path_from_session)
+            .and_then(|session_name| {
+                session_name
+                    .strip_suffix(session::SUFFIX)
+                    .map(resolve_server_path_from_session)
+            })
     }) {
         Some(session) => session,
         None => {
