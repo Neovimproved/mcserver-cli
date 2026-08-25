@@ -506,7 +506,7 @@ fn transform_to_kdl_string(raw_str: &str) -> String {
 
 pub fn add_alias(document: &mut KdlDocument, alias: &str, server: &str) -> Result<()> {
     if alias.len() > server.len() && alias != "default" {
-        println!("You are smart");
+        println!("Definitely practical");
     }
 
     let kdl_alias = transform_to_kdl_string(alias);
