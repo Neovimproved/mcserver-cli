@@ -518,45 +518,74 @@ pub fn add_alias(document: &mut KdlDocument, alias: &str, server: &str) -> Resul
             .as_mut()
             .ok_or(ParseConfigError::ExpectedChildren(NodeClass::Aliases))?;
 
-        // Remove existing alias(es) with the same name
-        children.nodes_mut().retain(|c| c.name().value() != alias);
+        // Remove existing alias(es) with the same name and remember the index of the first found
+        // copy of the alias if it is found
+        let mut idx = 0;
+        let mut alias_found = false;
 
-        children.nodes_mut().push(KdlNode::parse(&format!(
-            "    {} {}\n",
-            kdl_alias, kdl_server,
-        ))?);
+        children.nodes_mut().retain(|c| {
+            let retain_item = c.name().value() != alias;
+
+            if retain_item {
+                if !alias_found {
+                    idx += 1;
+                }
+            } else {
+                alias_found = true;
+            }
+
+            retain_item
+        });
+
+        children.nodes_mut().insert(
+            idx,
+            KdlNode::parse(&format!(
+                "{}    {} {}\n",
+                if idx == 0 { "\n" } else { "" },
+                kdl_alias,
+                kdl_server
+            ))?,
+        );
 
         return Ok(());
     }
 
+    // Case 2: there is no aliases field, so insert it its standard position (second last item
+    // before rcon, coincidentally making the logic simple)
     let nodes = document.nodes_mut();
 
-    let mut idx = 1;
-    let mut leading_newlines_needed = 0;
-    let mut trailing_newlines_needed = 0;
+    let (mut idx, mut preceding_node, mut succeeding_node) = (0, None, None);
 
     for node in nodes.iter() {
-        match node.name().value() {
-            "rcon" => {
-                if let Some(formatting) = node.format() {
-                    let leading_newlines = formatting.leading.matches('\n').count();
-                    let trailing_newlines = formatting.trailing.matches('\n').count();
-
-                    if leading_newlines < 2 {
-                        leading_newlines_needed = 2 - leading_newlines;
-                    }
-
-                    if trailing_newlines == 0 {
-                        trailing_newlines_needed = 1;
-                    }
-                }
-                break;
-            }
-            _ => {
-                idx += 1;
-            }
+        // prefer matches here as the rhs represents all of the nodes that go after this one
+        if matches!(node.name().value(), "rcon") {
+            succeeding_node = Some(node);
+            break;
         }
+
+        idx += 1;
+        preceding_node = Some(node);
     }
+
+    let leading_newlines_needed = if let Some(preceding) = preceding_node {
+        preceding
+            .format()
+            .map(|f| f.trailing.chars().rev().take_while(|c| *c == '\n').count())
+            .map(|n| 1usize.saturating_sub(n))
+            .unwrap_or(1)
+    } else {
+        0
+    };
+
+    let trailing_newlines_needed = if let Some(succeeding) = succeeding_node {
+        succeeding
+            .format()
+            .map(|f| f.leading.chars().take_while(|c| *c == '\n').count())
+            .map(|n| 2usize.saturating_sub(n))
+            .unwrap_or(2)
+    } else {
+        0
+    };
 
     nodes.insert(
         idx,
