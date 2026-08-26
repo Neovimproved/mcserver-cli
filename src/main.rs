@@ -10,7 +10,8 @@ use clap_complete::generate;
 use color_eyre::eyre::{Result, WrapErr};
 
 use cli::*;
-use config::handle_server_arg;
+
+use crate::server::ServerOptionExt;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -31,19 +32,20 @@ fn main() -> Result<()> {
                 return Ok(());
             };
 
-            if let Some(server) = server {
-                let resolved_server = config::server_or_current(server, &config)?;
-                config::add_alias(&mut document, &alias, &resolved_server)?;
+            if let Some(server) = server.map(|s| s.try_as_string(&config)).transpose()? {
+                config::add_alias(&mut document, &alias, &server)?;
                 config::write_document_to_config_file(&document, &config_dir)?;
-                println!("Alias `{alias}` now references `{resolved_server}`");
+                println!("Alias `{alias}` now references `{server}`");
             } else if let Some(server) = config.aliases.get(&alias) {
                 println!("{alias} aliases {server}");
             } else {
                 println!("{alias} does not alias anything");
             }
         }
-        Command::Attach { server } => session::attach(handle_server_arg(server, &config)?, &config)
-            .wrap_err("Failed to attach to session session")?,
+        Command::Attach { server } => {
+            session::attach(server.try_unwrap_or_fallback(&config)?, &config)
+                .wrap_err("Failed to attach to session session")?
+        }
         Command::Completions { shell } => {
             let cmd = Cli::command();
             generate(
@@ -66,20 +68,24 @@ fn main() -> Result<()> {
             session::delete_all_confirmed()
         }
         .wrap_err("Failed to delete all sessions")?,
-        Command::DeleteSession { session, force } => {
-            session::delete_server_session(handle_server_arg(session, &config)?, force)
-                .wrap_err("Failed to delete session")?
-        }
+        Command::DeleteSession { session, force } => session::delete_server_session(
+            session.try_unwrap_or_fallback(&config)?.as_session(),
+            force,
+        )
+        .wrap_err("Failed to delete session")?,
         Command::Deploy { server } => {
-            let server = handle_server_arg(server, &config)?;
+            let server = server.try_unwrap_or_fallback(&config)?;
+            let server_dir = server.try_as_absolute_path(&config)?;
+            let metadata_dir = server_dir.join(server::METADATA_DIRECTORY_NAME);
+
             session::new_server(
                 &server,
+                &metadata_dir,
                 Some(server::get_command(&server, &config)?),
-                &config,
             )?;
         }
         Command::Execute { server, commands } => {
-            let session_name = session::path_str_to_session(handle_server_arg(server, &config)?);
+            let session_name = server.try_unwrap_or_fallback(&config)?.as_session();
             for command in commands {
                 session::write_line(&session_name, command)?;
             }
@@ -95,7 +101,7 @@ fn main() -> Result<()> {
             println!("\n{} servers", servers.len());
         }
         Command::Rcon { server, commands } => {
-            server::rcon(handle_server_arg(server, &config)?, commands, &config)
+            server::rcon(&server.try_unwrap_or_fallback(&config)?, commands, &config)
                 .wrap_err("Failed to run rcon command")?
         }
         Command::New {
@@ -112,9 +118,10 @@ fn main() -> Result<()> {
         .wrap_err("Failed to remove server")?,
         Command::Restart => server::restart(&config).wrap_err("Failed to restart server")?,
         Command::Stop { server } => {
-            let server = handle_server_arg(server, &config)?;
-            server::rcon(&server, vec!["stop"], &config)
-                .wrap_err_with(|| format!("Failed to stop server {}", server))?;
+            let server = server.try_unwrap_or_fallback(&config)?;
+            server::rcon(&server, vec!["stop"], &config).wrap_err_with(|| {
+                format!("Failed to stop server {}", server.try_as_string(&config)?)
+            })?;
         }
         Command::Template { action } => match action {
             TemplateCommands::New { server } => server::new_template(&server, &config)

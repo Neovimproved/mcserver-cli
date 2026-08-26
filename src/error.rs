@@ -3,6 +3,7 @@ use std::{
     io,
     path::{self, PathBuf},
     result,
+    time::SystemTimeError,
 };
 
 use kdl::KdlError;
@@ -70,8 +71,8 @@ pub enum Error {
     #[error(transparent)]
     InvalidServersDirectory(#[from] InvalidServersDirectoryError),
 
-    #[error("Timestamp file ({0}) is invalid")]
-    InvalidTimestampFile(String),
+    #[error("Timestamp file ({}) is invalid", .0.display())]
+    InvalidTimestampFile(PathBuf),
 
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -106,8 +107,8 @@ pub enum Error {
     #[error("Server {0} already exists")]
     ServerAlreadyExists(String),
 
-    #[error("The machine's local time went backwards")]
-    TimeWentBackwards,
+    #[error(transparent)]
+    DurationMathFailure(#[from] SystemTimeError),
 
     #[error("Server {0} was not found")]
     ServerNotFound(String),

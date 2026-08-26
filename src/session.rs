@@ -11,7 +11,10 @@ use std::{
 use crate::{
     config::Config,
     error::{Error, Result},
-    server::save_last_used_now,
+    server::{
+        LAST_USED_FILE, Server, get_unix_epoch_secs, set_last_used_metadata, set_last_used_now,
+        set_last_used_with_meta_dir,
+    },
     session,
 };
 
@@ -112,18 +115,19 @@ pub fn get_server_sessions_to_living() -> Result<HashMap<String, bool>> {
         .collect())
 }
 
-pub fn attach(server: impl AsRef<str>, config: &Config) -> Result<()> {
-    let server = server.as_ref();
+pub fn attach(server: Server, config: &Config) -> Result<()> {
+    let session = server.as_session();
+
     let mut child = Command::new(BASE_COMMAND)
         .arg("attach")
-        .arg(path_str_to_session(server))
+        .arg(session)
         .stderr(Stdio::piped())
         .spawn()?;
 
     let status = child.wait()?;
 
     if status.success() {
-        save_last_used_now(server, config)
+        set_last_used_now(server, config)
     } else {
         let mut buf = Vec::new();
         child
@@ -169,20 +173,22 @@ pub fn new_session<S: AsRef<OsStr>, I: AsRef<OsStr>>(
 }
 
 pub fn new_server(
-    server: &str,
+    server: &Server,
+    metadata_dir: &Path,
     initial_command: Option<impl AsRef<OsStr>>,
-    config: &Config,
 ) -> Result<()> {
-    save_last_used_now(server, config)?;
-    let session_name = path_str_to_session(server);
-    new_session(session_name, initial_command)?;
-    save_last_used_now(server, config)
+    let last_used_file_path = metadata_dir.join(LAST_USED_FILE);
+    set_last_used_metadata(&last_used_file_path, get_unix_epoch_secs()?)?;
+    new_session(server.as_session(), initial_command)?;
+    set_last_used_metadata(&last_used_file_path, get_unix_epoch_secs()?)?;
+
+    Ok(())
 }
 
-pub fn delete_server_session(server: impl AsRef<str>, force: bool) -> Result<()> {
+pub fn delete_server_session(session: String, force: bool) -> Result<()> {
     let mut command = Command::new(BASE_COMMAND);
     command.arg("delete-session");
-    command.arg(path_str_to_session(server));
+    command.arg(session);
 
     if force {
         command.arg("--force");
@@ -194,7 +200,7 @@ pub fn delete_server_session(server: impl AsRef<str>, force: bool) -> Result<()>
 
 pub fn delete_all() -> Result<()> {
     for session in get_dead_server_sessions()? {
-        delete_server_session(&session, false)?;
+        delete_server_session(session, false)?;
     }
 
     Ok(())

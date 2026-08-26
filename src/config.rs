@@ -603,49 +603,6 @@ pub fn add_alias(document: &mut KdlDocument, alias: &str, server: &str) -> Resul
     Ok(())
 }
 
-pub fn get_current_server_directory(servers_dir: &Path) -> Result<String> {
-    let mut server_path = env::current_dir()?;
-
-    loop {
-        if fs::exists(server_path.join(server::METADATA_DIRECTORY_NAME))? {
-            break;
-        }
-
-        server_path = server_path
-            .parent()
-            .ok_or_else(|| InvalidServersDirectoryError::MissingParent(server_path.to_owned()))?
-            .to_path_buf();
-    }
-
-    let server = server_path
-        .strip_prefix(servers_dir)?
-        .to_string_lossy()
-        .into_owned();
-
-    Ok(server)
-}
-
-pub fn server_or_current<S>(server: S, config: &Config) -> Result<String>
-where
-    S: Into<String> + for<'a> PartialEq<&'a str>,
-{
-    if server == "." {
-        get_current_server_directory(config.servers_directory.expand()?)
-    } else {
-        Ok(server.into())
-    }
-}
-
-pub fn handle_server_arg(server: Option<String>, config: &Config) -> Result<String> {
-    match server {
-        Some(server) => server_or_current(server, config),
-        None => match &config.aliases.get("default") {
-            Some(default) => Ok(default.to_string()),
-            None => Err(Error::NoDefaultServer),
-        },
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
