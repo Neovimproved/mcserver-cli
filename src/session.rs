@@ -315,10 +315,6 @@ mod test {
         let upper_bound = test_duration as u128 * 1100 + 10;
         let range = lower_bound..=upper_bound;
 
-        if test_duration == 0 {
-            panic!("{elapsed_millis}");
-        }
-
         assert!(
             range.contains(&elapsed_millis),
             "Took {elapsed_millis} which is out of the range: {range:?}"
