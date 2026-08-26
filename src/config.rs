@@ -1,4 +1,5 @@
 use std::{
+    any::type_name,
     cell::UnsafeCell,
     collections::HashMap,
     env::{self, VarError},
@@ -48,10 +49,10 @@ pub struct ServersDirectory {
 
 impl Debug for ServersDirectory {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.expand() {
-            Ok(path) => write!(f, "{}", path.display()),
-            Err(_) => write!(f, "[failed to expand servers directory]"),
-        }
+        f.debug_struct(type_name::<Self>())
+            .field("raw_string", &self.raw_string)
+            .field("expanded", unsafe { &*self.expanded.get() })
+            .finish()
     }
 }
 
