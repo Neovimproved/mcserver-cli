@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, HashSet, hash_map::Entry},
     convert::Infallible,
@@ -28,7 +29,7 @@ use crate::{
     platforms::{self},
     session::{
         self, get_alive_server_sessions, get_dead_server_sessions, get_server_sessions_to_living,
-        path_str_to_session, path_to_session,
+        path_to_session,
     },
 };
 
@@ -43,12 +44,13 @@ const MULTIPLEXER_SESSION_NAME_VAR: &str = "ZELLIJ_SESSION_NAME";
 const SERVER_NAME_VAR: &str = "SERVER_NAME";
 
 #[derive(Clone, Debug)]
-pub enum Server {
+pub enum ServerId {
+    /// Note: this variant is given relative to the servers directory
     Str(String),
-    Path(PathBuf),
+    AbsolutePath(PathBuf),
 }
 
-impl FromStr for Server {
+impl FromStr for ServerId {
     type Err = Infallible;
 
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
@@ -65,9 +67,7 @@ fn current_absolute_server_dir(config: &Config) -> Result<PathBuf> {
         }
 
         if !server_path.pop() {
-            return Err(
-                InvalidServersDirectoryError::MissingParent(server_path.to_owned()).into(),
-            );
+            return Err(InvalidServersDirectoryError::MissingParent(server_path.to_owned()).into());
         }
     }
 
@@ -84,18 +84,18 @@ pub fn current_relative_server_dir(config: &Config) -> Result<PathBuf> {
         .to_path_buf())
 }
 
-impl Server {
+impl ServerId {
     pub fn from_session(session: String) -> Option<Self> {
         session
             .strip_suffix(session::SUFFIX)
             .map(|s| s.replace('.', MAIN_SEPARATOR_STR))
-            .map(|s| Self::Str(s))
+            .map(Self::Str)
     }
 
-    pub fn try_as_unresolved_str(&self) -> Result<&str> {
+    pub fn try_as_str_unresolved(&self) -> Result<&str> {
         match self {
-            Server::Str(s) => Ok(s),
-            Server::Path(path_buf) => path_buf
+            ServerId::Str(s) => Ok(s),
+            ServerId::AbsolutePath(path_buf) => path_buf
                 .to_str()
                 .ok_or_else(|| Error::InvalidServerString(path_buf.clone())),
         }
@@ -106,62 +106,80 @@ impl Server {
     }
 
     pub fn try_as_session(&self) -> Result<String> {
-        Ok(format!("{}{}", self.try_as_unresolved_str()?.replace(MAIN_SEPARATOR, "."), session::SUFFIX))
+        Ok(format!(
+            "{}{}",
+            self.try_as_str_unresolved()?.replace(MAIN_SEPARATOR, "."),
+            session::SUFFIX
+        ))
     }
 
-    pub fn try_into_relative_path(self, config: &Config) -> Result<PathBuf> {
-        match self {
-            Server::Str(unresolved_str) => if unresolved_str == "." {
-                current_relative_server_dir(&config)
-            } else {
-                Ok(PathBuf::from(unresolved_str.replace('.', MAIN_SEPARATOR_STR)))
-            },
-            Server::Path(path_buf) => Ok(path_buf),
-        }
-    }
-
-    pub fn try_into_absolute_path(self, config: &Config) -> Result<PathBuf> {
+    pub fn try_as_absolute_path(&self, config: &Config) -> Result<Cow<'_, Path>> {
         Ok(match self {
-            Server::Str(server) => if server == "." {
-                current_absolute_server_dir(&config)?
+            ServerId::Str(server) => Cow::Owned(if server == "." {
+                current_absolute_server_dir(config)?
             } else {
-                PathBuf::from(server)
-            },
-            Server::Path(path_buf) => config.servers_directory.expand()?.join(path_buf),
+                config.servers_directory.expand()?.join(server)
+            }),
+            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(path_buf),
         })
     }
 
-    pub fn try_as_string(&self, config: &Config) -> Result<String> {
-        match self {
+    pub fn try_as_str_relative(&self, config: &Config) -> Result<Cow<'_, str>> {
+        Ok(match self {
+            ServerId::Str(server) => {
+                if server == "." {
+                    let dir = current_relative_server_dir(config)?
+                        .into_os_string()
+                        .into_string()
+                        .map_err(|s| Error::InvalidServerString(PathBuf::from(s)))?;
 
-        }
-        Ok(if self.0 == "." {
-            let path_buf = current_absolute_server_dir(&config)?;
+                    Cow::Owned(dir)
+                } else {
+                    Cow::Borrowed(server)
+                }
+            }
+            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(
+                path_buf
+                    .strip_prefix(config.servers_directory.expand()?)?
+                    .to_str()
+                    .ok_or_else(|| Error::InvalidServerString(path_buf.to_owned()))?,
+            ),
+        })
+    }
 
-            path_buf
+    /// The absolute path but as a string (lossless conversion used, erroring if non-utf-8 is present)
+    pub fn try_as_str_absolute(&self, config: &Config) -> Result<Cow<'_, str>> {
+        Ok(match self {
+            ServerId::Str(server) => Cow::Owned(
+                if server == "." {
+                    current_absolute_server_dir(config)?
+                } else {
+                    config.servers_directory.expand()?.join(server)
+                }
                 .into_os_string()
                 .into_string()
-                .map_err(|s| Error::InvalidServerString(PathBuf::from(s)))?
-                .to_string()
-        } else {
-            self.0.replace('.', MAIN_SEPARATOR_STR)
+                .map_err(|s| Error::InvalidServerString(PathBuf::from(s)))?,
+            ),
+            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(
+                path_buf
+                    .to_str()
+                    .ok_or_else(|| Error::InvalidServerString(path_buf.to_owned()))?,
+            ),
         })
     }
 }
 
 pub trait ServerOptionExt {
-    fn try_unwrap_or_fallback(self, config: &Config) -> Result<Server>;
-
-    fn try_unwrap_to_session_or_fallback(self, config: &Config) -> Result<String>;
+    fn try_unwrap_or_fallback(self, config: &Config) -> Result<ServerId>;
 }
 
-impl ServerOptionExt for Option<Server> {
-    fn try_unwrap_or_fallback(self, config: &Config) -> Result<Server> {
+impl ServerOptionExt for Option<ServerId> {
+    fn try_unwrap_or_fallback(self, config: &Config) -> Result<ServerId> {
         if let Some(server) = self {
             return Ok(server);
         }
 
-        Ok(Server(
+        Ok(ServerId::Str(
             config
                 .aliases
                 .get("default")
@@ -169,13 +187,7 @@ impl ServerOptionExt for Option<Server> {
                 .to_string(),
         ))
     }
-
-    fn try_unwrap_to_session_or_fallback(self, config: &Config) -> Result<String> {
-        self.try_unwrap_or_fallback(config).map(|s| s.as_session())
-    }
 }
-
-impl Server {}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum LastUsed {
@@ -620,18 +632,18 @@ pub fn remove_dir_with_retries(dir: impl AsRef<Path>) -> Result<()> {
     unreachable!("Code returns before the for loop ends")
 }
 
-fn remove_server(server: Server, config: &Config) -> Result<()> {
+fn remove_server(server: ServerId, config: &Config) -> Result<()> {
     remove_dir_with_retries(server.try_as_absolute_path(config)?)
 }
 
-pub fn remove_servers(servers: Vec<Server>, config: &Config) -> Result<()> {
+pub fn remove_servers(servers: Vec<ServerId>, config: &Config) -> Result<()> {
     let all_servers = get_all_hashed(config)?;
 
     for server in servers {
-        let server_string = server.try_as_string(config)?;
+        let server_string = server.try_as_str_absolute(config)?;
 
-        if !all_servers.contains(&server_string) {
-            return Err(Error::ServerNotFound(server_string));
+        if !all_servers.contains(server_string.as_ref()) {
+            return Err(Error::ServerNotFound(server_string.to_string()));
         }
 
         remove_server(server, config)?;
@@ -640,13 +652,14 @@ pub fn remove_servers(servers: Vec<Server>, config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_servers_with_confirmation(servers: Vec<Server>, config: &Config) -> Result<()> {
+pub fn remove_servers_with_confirmation(servers: Vec<ServerId>, config: &Config) -> Result<()> {
     let all_servers = get_all_hashed(config)?;
 
     for server in servers {
-        let server_string = server.try_as_string(config)?;
-        if !all_servers.contains(&server_string) {
-            return Err(Error::ServerNotFound(server_string));
+        let server_string = server.try_as_str_absolute(config)?;
+
+        if !all_servers.contains(server_string.as_ref()) {
+            return Err(Error::ServerNotFound(server_string.to_string()));
         }
 
         if loop {
@@ -672,8 +685,8 @@ pub fn remove_servers_with_confirmation(servers: Vec<Server>, config: &Config) -
     Ok(())
 }
 
-pub fn set_last_used_metadata(path: &Path, timestamp: u64) -> Result<()> {
-    let mut file = File::create(path)?;
+pub fn set_last_used_metadata(last_used_file_path: &Path, timestamp: u64) -> Result<()> {
+    let mut file = File::create(last_used_file_path)?;
     file.write_all(&timestamp.to_le_bytes())?;
 
     Ok(())
@@ -784,7 +797,7 @@ pub fn create_new(
 }
 
 pub fn update_existing(
-    server: Server,
+    server: ServerId,
     platform: Platform,
     version: Option<String>,
     config: &Config,
@@ -810,9 +823,8 @@ pub fn get_unix_epoch_secs() -> result::Result<u64, SystemTimeError> {
         .map(|dur| dur.as_secs())
 }
 
-pub fn get_last_used(server: Server, config: &Config) -> Result<LastUsed> {
-    let timestamp_path = server
-        .try_as_absolute_path(config)?
+pub fn get_last_used(server_dir: &Path) -> Result<LastUsed> {
+    let timestamp_path = server_dir
         .join(METADATA_DIRECTORY_NAME)
         .join(LAST_USED_FILE);
 
@@ -938,35 +950,19 @@ pub fn get_servers_list(
     if active {
         retain_active(&mut servers)?;
     } else if inactive {
-        retain_and_tag_inactive(&mut servers, config)?;
+        retain_and_tag_inactive(&mut servers)?;
         if dead {
             tag_dead(&mut servers)?;
         }
     } else if dead {
-        retain_and_tag_dead(&mut servers, config)?;
+        retain_and_tag_dead(&mut servers)?;
     } else {
-        fully_tag_servers(&mut servers, config)?;
+        fully_tag_servers(&mut servers)?;
     }
 
     servers.sort_unstable();
 
     Ok(servers)
-}
-
-pub fn resolve_absolute_server_dir(
-    relative_server_path: impl AsRef<Path>,
-    config: &Config,
-) -> Result<PathBuf> {
-    let server_dir = config
-        .servers_directory
-        .expand()?
-        .join(relative_server_path);
-
-    if !server_dir.is_dir() {
-        return Err(Error::MissingDirectory(server_dir));
-    }
-
-    Ok(server_dir)
 }
 
 fn get_server_jar_path_ensured(server_dir: impl AsRef<Path>) -> Result<PathBuf> {
@@ -988,19 +984,15 @@ fn get_server_jar_path_ensured(server_dir: impl AsRef<Path>) -> Result<PathBuf> 
     Ok(jar_file_path)
 }
 
-pub fn get_command(server: &Server, config: &Config) -> Result<String> {
+pub fn get_command(server: &ServerId, config: &Config) -> Result<String> {
     let server_dir = server.try_as_absolute_path(config)?;
 
     if path_is_template(&server_dir) {
         return Err(Error::TemplateDeployed);
     }
 
-    let server_string = server.try_as_string(config)?;
-
-    let server_dir_string = server_dir
-        .into_os_string()
-        .into_string()
-        .map_err(|os_string| Error::InvalidServerString(PathBuf::from(os_string)))?;
+    let server_name = server.try_as_str_relative(config)?;
+    let server_dir_string = server.try_as_str_absolute(config)?;
 
     let server_jar_path = get_server_jar_path_ensured(&server_dir)?
         .into_os_string()
@@ -1018,62 +1010,63 @@ pub fn get_command(server: &Server, config: &Config) -> Result<String> {
     let restart_timer = session::create_timer(config.restart_time);
 
     Ok(format!(
-        "export {SERVER_NAME_VAR}={server_string} && {} action rename-tab Server && cd {server_dir_string} && while :; do java -jar {java_args_string} {server_jar_path} {nogui_option} && {restart_timer}; done",
+        "export {SERVER_NAME_VAR}={server_name} && {} action rename-tab Server && cd {server_dir_string} && while :; do java -jar {java_args_string} {server_jar_path} {nogui_option} && {restart_timer}; done",
         session::BASE_COMMAND,
     ))
 }
 
 pub fn restart(config: &Config) -> Result<()> {
-    let server_name = match env::var(SERVER_NAME_VAR).ok().map(Server::from_var).or_else(|| {
-        env::var(MULTIPLEXER_SESSION_NAME_VAR)
-            .ok()
-            .and_then(Server::from_session)
-    }) {
+    let server = match env::var(SERVER_NAME_VAR)
+        .ok()
+        .map(ServerId::from_var)
+        .or_else(|| {
+            env::var(MULTIPLEXER_SESSION_NAME_VAR)
+                .ok()
+                .and_then(ServerId::from_session)
+        }) {
         Some(session) => session,
         None => {
             let cd = env::current_dir()?;
             let stripped = cd.strip_prefix(config.servers_directory.expand()?)?;
-
-            stripped
-                .to_str()
-                .ok_or_else(|| Error::InvalidServerString(stripped.to_path_buf()))?
-                .to_owned()
+            ServerId::AbsolutePath(stripped.to_path_buf())
         }
     };
 
-    set_last_used_metadata(server., config)?;
+    let server_dir = server.try_as_absolute_path(config)?;
 
-    session::write_line(
-        path_str_to_session(&server_name),
-        get_command(&server_name, config)?,
-    )
+    set_last_used_metadata(
+        &server_dir
+            .join(METADATA_DIRECTORY_NAME)
+            .join(LAST_USED_FILE),
+        get_unix_epoch_secs()?,
+    )?;
+
+    session::write_line(server.try_as_session()?, get_command(&server, config)?)
 }
 
 pub fn path_is_template(server: &Path) -> bool {
     server.ends_with(TEMPLATE_SUFFIX)
 }
 
-pub fn new_template(server: impl AsRef<str>, config: &Config) -> Result<()> {
-    let server = server.as_ref();
-    if path_is_template(server) {
+pub fn new_template(server: &ServerId, config: &Config) -> Result<()> {
+    let server_dir_binding = server.try_as_absolute_path(config)?;
+    let server_dir = server_dir_binding.as_ref();
+
+    if path_is_template(server_dir) {
         return Err(Error::TemplateUsedForTemplate);
     }
-    println!("Creating template using server {server}...");
 
-    let servers_dir = config.servers_directory.expand()?;
+    let server_string = server.try_as_str_relative(config)?;
 
-    let server_path = servers_dir.join(server);
-    if !server_path.exists() {
-        return Err(Error::ServerNotFound(server.to_string()));
+    println!("Creating template using server {server_string}...");
+
+    if !server_dir.exists() {
+        return Err(Error::ServerNotFound(server_string.to_string()));
     }
 
-    let template_path = servers_dir.join(format!("{server}{TEMPLATE_SUFFIX}"));
+    let template_dir = server_dir.with_added_extension(TEMPLATE_SUFFIX);
 
-    if template_path.exists() {
-        return Err(Error::TemplateAlreadyExists(server.to_string()));
-    }
-
-    copy_directory(server_path, template_path)?;
+    copy_directory(server_dir, template_dir)?;
 
     Ok(())
 }
@@ -1098,37 +1091,32 @@ fn get_first_server_path(name: &str, config: &Config) -> Result<PathBuf> {
     })
 }
 
-pub fn from_template(
-    template: impl AsRef<str>,
-    server: Option<impl AsRef<str>>,
-    config: &Config,
-) -> Result<()> {
-    let template = template.as_ref();
-    let servers_dir = config.servers_directory.expand()?;
+pub fn from_template(template: &ServerId, server: Option<ServerId>, config: &Config) -> Result<()> {
+    let template_path = template.try_as_absolute_path(config)?;
 
-    let template_path = if template.ends_with(TEMPLATE_SUFFIX) {
-        println!("Creating server from {template}");
-        servers_dir.join(template)
+    let template_path = if !template_path.ends_with(TEMPLATE_SUFFIX) {
+        Cow::Owned(template_path.as_ref().with_added_extension(TEMPLATE_SUFFIX))
     } else {
-        let template_name = format!("{}{TEMPLATE_SUFFIX}", template);
-        println!("Creating server from {template_name}");
-        servers_dir.join(template_name)
+        template_path
     };
 
+    println!("Creating server from {}", template_path.display());
+
     if !template_path.exists() {
-        return Err(Error::TemplateNotFound(template.to_string()));
+        return Err(Error::TemplateNotFound(template_path.to_path_buf()));
     }
 
     let server_path = match server {
         Some(server) => {
-            let server = server.as_ref();
-            let path = servers_dir.join(server);
+            let path = server.try_as_absolute_path(config)?;
+
             if path.exists() {
-                return Err(Error::ServerAlreadyExists(server.to_string()));
+                return Err(Error::ServerAlreadyExists(path.to_path_buf()));
             }
-            path
+
+            path.into_owned()
         }
-        None => get_first_server_path(template, config)?,
+        None => get_first_server_path(template.try_as_str_relative(config)?.as_ref(), config)?,
     };
 
     copy_directory(template_path, server_path)?;
@@ -1194,26 +1182,23 @@ pub fn retain_active(servers: &mut Vec<AbsoluteServerObject>) -> Result<()> {
     Ok(())
 }
 
-fn add_last_used_tag(server: &mut AbsoluteServerObject, config: &Config) {
-    server.set_last_used(get_last_used(&server.path, config).unwrap_or(LastUsed::Unknown));
+fn add_last_used_tag(server: &mut AbsoluteServerObject) {
+    server.set_last_used(get_last_used(&server.path).unwrap_or(LastUsed::Unknown));
 }
 
-pub fn retain_and_tag_inactive(
-    servers: &mut Vec<AbsoluteServerObject>,
-    config: &Config,
-) -> Result<()> {
+pub fn retain_and_tag_inactive(servers: &mut Vec<AbsoluteServerObject>) -> Result<()> {
     let sessions = get_alive_server_sessions()?;
 
     servers.retain(|server| !sessions.contains(server.path.to_string_lossy().as_ref()));
 
     servers
         .iter_mut()
-        .for_each(|server: &mut AbsoluteServerObject| add_last_used_tag(server, config));
+        .for_each(|server: &mut AbsoluteServerObject| add_last_used_tag(server));
 
     Ok(())
 }
 
-pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Config) -> Result<()> {
+pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>) -> Result<()> {
     let dead_sessions = get_dead_server_sessions()?;
 
     servers.retain(|server| {
@@ -1224,13 +1209,11 @@ pub fn retain_and_tag_dead(servers: &mut Vec<AbsoluteServerObject>, config: &Con
         }
     });
 
-    servers
-        .iter_mut()
-        .for_each(|server: &mut AbsoluteServerObject| add_last_used_tag(server, config));
+    servers.iter_mut().for_each(add_last_used_tag);
     Ok(())
 }
 
-pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) -> Result<()> {
+pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject]) -> Result<()> {
     let mapped_sessions = get_server_sessions_to_living()?;
 
     servers.iter_mut().try_for_each(|server| -> Result<()> {
@@ -1240,10 +1223,10 @@ pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) 
         ) {
             Some(true) => server.set_state(ServerState::Active),
             Some(false) => {
-                add_last_used_tag(server, config);
+                add_last_used_tag(server);
                 server.set_state(ServerState::Dead);
             }
-            None => add_last_used_tag(server, config),
+            None => add_last_used_tag(server),
         };
 
         Ok(())
@@ -1253,7 +1236,7 @@ pub fn fully_tag_servers(servers: &mut [AbsoluteServerObject], config: &Config) 
 }
 
 pub fn rcon<T: AsRef<OsStr>>(
-    server: &Server,
+    server_string: &str,
     commands: impl AsRef<[T]>,
     config: &Config,
 ) -> Result<()> {
@@ -1263,12 +1246,10 @@ pub fn rcon<T: AsRef<OsStr>>(
         println!("{:?}: {v:?}", k.chars().next());
     }
 
-    let server_string = server.try_as_string(config)?;
-
     let server_rcon_config = rcon_config
-        .get(&server_string)
+        .get(server_string)
         .or_else(|| rcon_config.get(&format!("\"{server_string}\"")))
-        .ok_or_else(|| Error::MissingRconConfig(server_string))?;
+        .ok_or_else(|| Error::MissingRconConfig(server_string.to_string()))?;
 
     let mut command = Command::new("mcrcon");
 

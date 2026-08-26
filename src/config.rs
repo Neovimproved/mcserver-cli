@@ -13,10 +13,7 @@ use std::{
 use kdl::{KdlDocument, KdlIdentifier, KdlNode, KdlValue};
 use shellexpand::LookupError;
 
-use crate::{
-    error::{Error, InvalidServersDirectoryError, ParseConfigError, Result},
-    server,
-};
+use crate::error::{Error, ParseConfigError, Result};
 
 const DEFAULT_CONFIG: &str = include_str!(concat!(env!("OUT_DIR"), "/generated_config.kdl"));
 

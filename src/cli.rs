@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint, value_parser};
 use clap_complete::Shell;
 
-use crate::server::Server;
+use crate::server::ServerId;
 
 #[derive(Parser)]
 #[command(name = "mcserver", version, about)]
@@ -20,14 +20,14 @@ pub enum Command {
         #[arg()]
         alias: Option<String>,
 
-        #[arg(value_hint = ValueHint::DirPath, value_parser = value_parser!(Server))]
-        server: Option<Server>,
+        #[arg(value_hint = ValueHint::DirPath, value_parser = value_parser!(ServerId))]
+        server: Option<ServerId>,
     },
 
     #[command(visible_alias = "a", about = "Attach to a server session")]
     Attach {
         #[arg(value_hint = ValueHint::DirPath)]
-        server: Option<Server>,
+        server: Option<ServerId>,
     },
 
     #[command(visible_alias = "cmp", about = "Generate completions for your shell")]
@@ -62,19 +62,19 @@ pub enum Command {
         force: bool,
 
         #[arg(value_hint = ValueHint::DirPath)]
-        session: Option<Server>,
+        session: Option<ServerId>,
     },
 
     #[command(visible_alias = "dpl", about = "Deploy a server")]
     Deploy {
         #[arg(value_hint = ValueHint::DirPath)]
-        server: Option<Server>,
+        server: Option<ServerId>,
     },
 
     #[command(visible_alias = "exec", about = "Execute a command on a server")]
     Execute {
         #[arg(short, long)]
-        server: Option<Server>,
+        server: Option<ServerId>,
 
         #[arg(trailing_var_arg = true)]
         commands: Vec<String>,
@@ -85,7 +85,7 @@ pub enum Command {
 
     #[command(about = "Interact with a server, using the minecraft remote console")]
     Rcon {
-        server: Option<Server>,
+        server: Option<ServerId>,
 
         commands: Vec<String>,
     },
@@ -128,14 +128,14 @@ pub enum Command {
         #[arg(short, long)]
         force: bool,
 
-        servers: Vec<Server>,
+        servers: Vec<ServerId>,
     },
 
     #[command(visible_alias = "rst", about = "Restart the current server")]
     Restart,
 
     #[command(about = "Stop a server")]
-    Stop { server: Option<Server> },
+    Stop { server: Option<ServerId> },
 
     #[command(visible_alias = "tmpl", about = "Create or use a template server")]
     Template {
@@ -148,7 +148,7 @@ pub enum Command {
 
     #[command(about = "Update a server's .jar file and reference")]
     Update {
-        server: Server,
+        server: ServerId,
 
         platform: Platform,
 
@@ -183,14 +183,14 @@ pub struct ListingArguments {
 #[derive(Subcommand)]
 pub enum TemplateCommands {
     New {
-        server: Server,
+        server: ServerId,
     },
 
     From {
-        template: Server,
+        template: ServerId,
 
         #[arg(short, long)]
-        server: Option<Server>,
+        server: Option<ServerId>,
     },
 }
 

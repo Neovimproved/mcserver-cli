@@ -104,8 +104,8 @@ pub enum Error {
     #[error(transparent)]
     ShellexpandLookup(#[from] shellexpand::LookupError<VarError>),
 
-    #[error("Server {0} already exists")]
-    ServerAlreadyExists(String),
+    #[error("A server already exists at {}", .0.display())]
+    ServerAlreadyExists(PathBuf),
 
     #[error(transparent)]
     DurationMathFailure(#[from] SystemTimeError),
@@ -116,14 +116,11 @@ pub enum Error {
     #[error(transparent)]
     StripPrefix(#[from] path::StripPrefixError),
 
-    #[error("Template {0} already exists")]
-    TemplateAlreadyExists(String),
-
     #[error("Template servers cannot be deployed")]
     TemplateDeployed,
 
-    #[error("Template with the name {0} was not found")]
-    TemplateNotFound(String),
+    #[error("Template at {0} was not found")]
+    TemplateNotFound(PathBuf),
 
     #[error("Cannot create a template with a template")]
     TemplateUsedForTemplate,

@@ -32,7 +32,8 @@ fn main() -> Result<()> {
                 return Ok(());
             };
 
-            if let Some(server) = server.map(|s| s.try_as_string(&config)).transpose()? {
+            if let Some(server) = server {
+                let server = server.try_as_str_relative(&config)?;
                 config::add_alias(&mut document, &alias, &server)?;
                 config::write_document_to_config_file(&document, &config_dir)?;
                 println!("Alias `{alias}` now references `{server}`");
@@ -69,7 +70,7 @@ fn main() -> Result<()> {
         }
         .wrap_err("Failed to delete all sessions")?,
         Command::DeleteSession { session, force } => session::delete_server_session(
-            session.try_unwrap_or_fallback(&config)?.as_session(),
+            session.try_unwrap_or_fallback(&config)?.try_as_session()?,
             force,
         )
         .wrap_err("Failed to delete session")?,
@@ -85,7 +86,7 @@ fn main() -> Result<()> {
             )?;
         }
         Command::Execute { server, commands } => {
-            let session_name = server.try_unwrap_or_fallback(&config)?.as_session();
+            let session_name = server.try_unwrap_or_fallback(&config)?.try_as_session()?;
             for command in commands {
                 session::write_line(&session_name, command)?;
             }
@@ -100,10 +101,14 @@ fn main() -> Result<()> {
 
             println!("\n{} servers", servers.len());
         }
-        Command::Rcon { server, commands } => {
-            server::rcon(&server.try_unwrap_or_fallback(&config)?, commands, &config)
-                .wrap_err("Failed to run rcon command")?
-        }
+        Command::Rcon { server, commands } => server::rcon(
+            &server
+                .try_unwrap_or_fallback(&config)?
+                .try_as_str_relative(&config)?,
+            commands,
+            &config,
+        )
+        .wrap_err("Failed to run rcon command")?,
         Command::New {
             platform,
             version,
@@ -119,16 +124,32 @@ fn main() -> Result<()> {
         Command::Restart => server::restart(&config).wrap_err("Failed to restart server")?,
         Command::Stop { server } => {
             let server = server.try_unwrap_or_fallback(&config)?;
-            server::rcon(&server, vec!["stop"], &config).wrap_err_with(|| {
-                format!("Failed to stop server {}", server.try_as_string(&config)?)
-            })?;
+            let server_string = server.try_as_str_relative(&config)?;
+
+            server::rcon(&server_string, vec!["stop"], &config)
+                .wrap_err_with(|| format!("Failed to stop server {}", server_string))?;
         }
         Command::Template { action } => match action {
             TemplateCommands::New { server } => server::new_template(&server, &config)
-                .wrap_err_with(|| format!("Failed to create template with server {server}"))?,
+                .wrap_err_with(|| {
+                    format!(
+                        "Failed to create template with server {}",
+                        server
+                            .try_as_str_relative(&config)
+                            .as_deref()
+                            .unwrap_or("unknown")
+                    )
+                })?,
             TemplateCommands::From { template, server } => {
-                server::from_template(&template, server.as_deref(), &config)
-                    .wrap_err_with(|| format!("Failed to use template {template}"))?
+                server::from_template(&template, server, &config).wrap_err_with(|| {
+                    format!(
+                        "Failed to use template {}",
+                        template
+                            .try_as_str_relative(&config)
+                            .as_deref()
+                            .unwrap_or("unknown")
+                    )
+                })?
             }
         },
         Command::Tree(listing_arguments) => {

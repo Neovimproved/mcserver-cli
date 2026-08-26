@@ -11,10 +11,7 @@ use std::{
 use crate::{
     config::Config,
     error::{Error, Result},
-    server::{
-        LAST_USED_FILE, Server, get_unix_epoch_secs, set_last_used_metadata, set_last_used_now,
-        set_last_used_with_meta_dir,
-    },
+    server::{LAST_USED_FILE, ServerId, get_unix_epoch_secs, set_last_used_metadata},
     session,
 };
 
@@ -115,8 +112,8 @@ pub fn get_server_sessions_to_living() -> Result<HashMap<String, bool>> {
         .collect())
 }
 
-pub fn attach(server: Server, config: &Config) -> Result<()> {
-    let session = server.as_session();
+pub fn attach(server: ServerId, config: &Config) -> Result<()> {
+    let session = server.try_as_session()?;
 
     let mut child = Command::new(BASE_COMMAND)
         .arg("attach")
@@ -127,7 +124,10 @@ pub fn attach(server: Server, config: &Config) -> Result<()> {
     let status = child.wait()?;
 
     if status.success() {
-        set_last_used_now(server, config)
+        set_last_used_metadata(
+            &server.try_as_absolute_path(config)?,
+            get_unix_epoch_secs()?,
+        )
     } else {
         let mut buf = Vec::new();
         child
@@ -173,13 +173,13 @@ pub fn new_session<S: AsRef<OsStr>, I: AsRef<OsStr>>(
 }
 
 pub fn new_server(
-    server: &Server,
+    server: &ServerId,
     metadata_dir: &Path,
     initial_command: Option<impl AsRef<OsStr>>,
 ) -> Result<()> {
     let last_used_file_path = metadata_dir.join(LAST_USED_FILE);
     set_last_used_metadata(&last_used_file_path, get_unix_epoch_secs()?)?;
-    new_session(server.as_session(), initial_command)?;
+    new_session(server.try_as_session()?, initial_command)?;
     set_last_used_metadata(&last_used_file_path, get_unix_epoch_secs()?)?;
 
     Ok(())
