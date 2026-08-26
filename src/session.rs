@@ -18,18 +18,13 @@ use crate::{
 pub const BASE_COMMAND: &str = "zellij";
 pub const SUFFIX: &str = ".mcserver";
 
-#[macro_export]
-macro_rules! create_timer {
-    ($secs:expr) => {
-        concat!(
-            "for i in {",
-            $secs,
-            "..1}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done"
-        )
-    };
+pub fn create_timer(secs: usize) -> String {
+    if secs == 0 {
+        "echo \"RESTARTING...\"".to_string()
+    } else {
+        format!("for i in {{{secs}..1}}; do echo \"RESTARTING in $i seconds...\" && sleep 1; done")
+    }
 }
-
-pub(crate) use create_timer;
 
 pub fn path_str_to_session(server_path: impl AsRef<str>) -> String {
     format!(
@@ -262,7 +257,11 @@ pub fn write_line(session: impl AsRef<OsStr>, chars: impl AsRef<OsStr>) -> Resul
 
 #[cfg(test)]
 mod test {
-    use std::{path::PathBuf, process::Command};
+    use std::{
+        path::PathBuf,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use super::*;
 
@@ -275,22 +274,70 @@ mod test {
         );
     }
 
-    #[test]
-    fn wait_cmd() {
+    fn test_timer(test_duration: usize) -> io::Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+
         let output = Command::new("bash")
             .arg("-c")
-            .arg(create_timer!(1))
-            .output()
-            .expect("Failed to run timer command");
+            .arg(format!(
+                "date +%s%6N > {} && {}",
+                file.path()
+                    .to_str()
+                    .expect("Failed to convert tempfile into string"),
+                create_timer(test_duration)
+            ))
+            .output()?;
 
-        assert_eq!(
-            output
-                .status
-                .code()
-                .expect("Failed to get status code of timer"),
-            0,
-            "Timer returned code {}",
-            output.status
+        let end = SystemTime::now();
+
+        let mut start = String::new();
+        file.into_file().read_to_string(&mut start)?;
+
+        let elapsed_millis = end
+            .duration_since(
+                UNIX_EPOCH
+                    + Duration::from_micros(
+                        start.trim().parse().expect("Failed to parse timestamp"),
+                    ),
+            )
+            .expect("Failed to calculate time passed")
+            .as_millis();
+
+        assert!(output.status.success(), "Timer returned {}", output.status);
+
+        let lower_bound = test_duration as u128 * 950;
+        let upper_bound = test_duration as u128 * 1100 + 10;
+        let range = lower_bound..=upper_bound;
+
+        if test_duration == 0 {
+            panic!("{elapsed_millis}");
+        }
+
+        assert!(
+            range.contains(&elapsed_millis),
+            "Took {elapsed_millis} which is out of the range: {range:?}"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_0s() -> io::Result<()> {
+        test_timer(0)
+    }
+
+    #[test]
+    fn test_1s() -> io::Result<()> {
+        test_timer(1)
+    }
+
+    #[test]
+    fn test_2s() -> io::Result<()> {
+        test_timer(2)
+    }
+
+    #[test]
+    fn test_3s() -> io::Result<()> {
+        test_timer(3)
     }
 }

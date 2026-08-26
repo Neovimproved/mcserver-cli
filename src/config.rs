@@ -92,6 +92,7 @@ pub struct Config {
     pub nogui: bool,
     pub servers_directory: ServersDirectory,
     pub aliases: HashMap<String, String>,
+    pub restart_time: usize,
     pub rcon: HashMap<String, RconConfig>,
 }
 
@@ -428,6 +429,7 @@ fn parse_config(document: &KdlDocument) -> Result<Config> {
         servers_directory,
         aliases,
         rcon,
+        restart_time: 3,
     })
 }
 
