@@ -25,7 +25,7 @@
         {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "mcserver";
-            version = "0.2.4";
+            version = "0.2.5";
             cargoLock.lockFile = ./Cargo.lock;
             src = lib.cleanSource ./.;
 
