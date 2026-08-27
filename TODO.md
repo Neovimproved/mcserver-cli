@@ -7,3 +7,4 @@
 - [x] Add alias command (edits the config automatically)
 - [ ] Add a server building system
 - [ ] Make deployment and killing more flexible
+- [ ] Make the listing subcommands more robust (handle files carefully etc.)
