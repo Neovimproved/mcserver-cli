@@ -113,7 +113,7 @@ pub fn get_server_sessions_to_living() -> Result<HashMap<String, bool>> {
 }
 
 pub fn attach(server: ServerId, config: &Config) -> Result<()> {
-    let session = server.try_as_session()?;
+    let session = server.try_as_session(config)?;
 
     let mut child = Command::new(BASE_COMMAND)
         .arg("attach")
@@ -176,10 +176,11 @@ pub fn new_server(
     server: &ServerId,
     metadata_dir: &Path,
     initial_command: Option<impl AsRef<OsStr>>,
+    config: &Config,
 ) -> Result<()> {
     let last_used_file_path = metadata_dir.join(LAST_USED_FILE);
     set_last_used_metadata(&last_used_file_path, get_unix_epoch_secs()?)?;
-    new_session(server.try_as_session()?, initial_command)?;
+    new_session(server.try_as_session(config)?, initial_command)?;
     set_last_used_metadata(&last_used_file_path, get_unix_epoch_secs()?)?;
 
     Ok(())

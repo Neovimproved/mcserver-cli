@@ -92,23 +92,16 @@ impl ServerId {
             .map(Self::Str)
     }
 
-    pub fn try_as_str_unresolved(&self) -> Result<&str> {
-        match self {
-            ServerId::Str(s) => Ok(s),
-            ServerId::AbsolutePath(path_buf) => path_buf
-                .to_str()
-                .ok_or_else(|| Error::InvalidServerString(path_buf.clone())),
-        }
-    }
-
     pub fn from_var(var: String) -> Self {
         Self::Str(var)
     }
 
-    pub fn try_as_session(&self) -> Result<String> {
+    pub fn try_as_session(&self, config: &Config) -> Result<String> {
         Ok(format!(
             "{}{}",
-            self.try_as_str_unresolved()?.replace(MAIN_SEPARATOR, "."),
+            self.try_as_str_relative(config)?
+                .as_ref()
+                .replace(MAIN_SEPARATOR, "."),
             session::SUFFIX
         ))
     }
@@ -171,6 +164,8 @@ impl ServerId {
 
 pub trait ServerOptionExt {
     fn try_unwrap_or_fallback(self, config: &Config) -> Result<ServerId>;
+
+    fn try_unwrap_to_session_or_fallback(self, config: &Config) -> Result<String>;
 }
 
 impl ServerOptionExt for Option<ServerId> {
@@ -186,6 +181,11 @@ impl ServerOptionExt for Option<ServerId> {
                 .ok_or(Error::NoDefaultServer)?
                 .to_string(),
         ))
+    }
+
+    fn try_unwrap_to_session_or_fallback(self, config: &Config) -> Result<String> {
+        let server = self.try_unwrap_or_fallback(config)?;
+        server.try_as_session(config)
     }
 }
 
@@ -1041,7 +1041,10 @@ pub fn restart(config: &Config) -> Result<()> {
         get_unix_epoch_secs()?,
     )?;
 
-    session::write_line(server.try_as_session()?, get_command(&server, config)?)
+    session::write_line(
+        server.try_as_session(config)?,
+        get_command(&server, config)?,
+    )
 }
 
 pub fn path_is_template(server: &Path) -> bool {

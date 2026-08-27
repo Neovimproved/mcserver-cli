@@ -70,7 +70,7 @@ fn main() -> Result<()> {
         }
         .wrap_err("Failed to delete all sessions")?,
         Command::DeleteSession { session, force } => session::delete_server_session(
-            session.try_unwrap_or_fallback(&config)?.try_as_session()?,
+            session.try_unwrap_to_session_or_fallback(&config)?,
             force,
         )
         .wrap_err("Failed to delete session")?,
@@ -83,10 +83,12 @@ fn main() -> Result<()> {
                 &server,
                 &metadata_dir,
                 Some(server::get_command(&server, &config)?),
+                &config,
             )?;
         }
         Command::Execute { server, commands } => {
-            let session_name = server.try_unwrap_or_fallback(&config)?.try_as_session()?;
+            let session_name = server.try_unwrap_to_session_or_fallback(&config)?;
+
             for command in commands {
                 session::write_line(&session_name, command)?;
             }
