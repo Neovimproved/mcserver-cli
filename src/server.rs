@@ -719,7 +719,7 @@ pub fn set_default_metadata(metadata_dir: &Path, jar_file_name: &[u8]) -> Result
     fs::create_dir_all(metadata_dir)?;
 
     set_jar_file_metadata(metadata_dir, jar_file_name)?;
-    set_last_used_metadata(metadata_dir, u64::MAX)?;
+    set_last_used_metadata(&metadata_dir.join(LAST_USED_FILE), u64::MAX)?;
 
     Ok(())
 }
