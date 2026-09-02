@@ -1,9 +1,5 @@
 use std::{
-    env::VarError,
-    io,
-    path::{self, PathBuf},
-    result,
-    time::SystemTimeError,
+    env::VarError, io, path::{self, PathBuf}, result, str::Utf8Error, time::SystemTimeError,
 };
 
 use kdl::KdlError;
@@ -130,6 +126,9 @@ pub enum Error {
 
     #[error(transparent)]
     UrlParse(#[from] url::ParseError),
+
+    #[error(transparent)]
+    Utf8(#[from] Utf8Error),
 
     #[error(transparent)]
     VarError(#[from] VarError),

@@ -1,15 +1,71 @@
-use std::path::PathBuf;
+use std::{
+    borrow::Cow, collections::HashSet, ffi::OsStr, os::unix::ffi::OsStrExt, path::{Path, PathBuf},
+};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint, value_parser};
-use clap_complete::Shell;
+use clap_complete::{ArgValueCompleter, CompletionCandidate, Shell};
 
-use crate::server::ServerId;
+use crate::{
+    config::{self, Config, get_directory},
+    error::{Error, Result},
+    server::{self, ServerId},
+    session::get_alive_server_sessions,
+};
 
 #[derive(Parser)]
 #[command(name = "mcserver", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+}
+
+fn validate_server_path(
+    path: &Path,
+    session_whitelist: &HashSet<String>,
+    config: &Config,
+) -> Result<Option<String>> {
+    let server_id = ServerId::from_path(path.to_path_buf());
+
+    let session_name = server_id.try_as_session(config)?;
+
+    Ok(if session_whitelist.contains(&session_name) {
+        Some(server_id
+            .try_as_string_relative(config)?
+            .to_string())
+    } else {
+        None
+    })
+}
+
+// Use a result purely because propagation is nice
+fn try_get_servers(current: &OsStr) -> Result<Vec<CompletionCandidate>> {
+    let mut servers = vec![];
+    let (config, _) = config::load(get_directory()?.join(config::CONFIG_FILE_NAME))?;
+    let server_sessions = get_alive_server_sessions()?;
+    let current_str = str::from_utf8(current.as_bytes())?;
+
+    server::for_each(
+        |path| {
+            let Ok(Some(server_name)) = validate_server_path(path, &server_sessions, &config) else {
+                return;
+            };
+
+            if server_name.starts_with(current_str) {
+                servers.push(CompletionCandidate::from(server_name));
+            }
+        },
+        &config,
+    )?;
+
+    Ok(servers)
+}
+
+fn complete_inactive(current: &OsStr) -> Vec<CompletionCandidate> {
+    try_get_servers(current).unwrap_or_else(|_| vec![])
+}
+
+fn complete_active(current: &OsStr) -> Vec<CompletionCandidate> {
+    todo!()
 }
 
 #[non_exhaustive]
@@ -67,7 +123,7 @@ pub enum Command {
 
     #[command(visible_alias = "dpl", about = "Deploy a server")]
     Deploy {
-        #[arg(value_hint = ValueHint::DirPath)]
+        #[arg(add = ArgValueCompleter::new(complete_inactive))]
         server: Option<ServerId>,
     },
 
@@ -85,6 +141,7 @@ pub enum Command {
 
     #[command(about = "Interact with a server, using the minecraft remote console")]
     Rcon {
+        #[arg(add = ArgValueCompleter::new(complete_active))]
         server: Option<ServerId>,
 
         commands: Vec<String>,

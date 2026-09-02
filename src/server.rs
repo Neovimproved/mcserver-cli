@@ -43,6 +43,16 @@ pub const LAST_USED_FILE: &str = "last_used.timestamp";
 const MULTIPLEXER_SESSION_NAME_VAR: &str = "ZELLIJ_SESSION_NAME";
 const SERVER_NAME_VAR: &str = "SERVER_NAME";
 
+trait PathBufExt {
+    fn into_string_ext(self) -> result::Result<String, Self> where Self: Sized;
+}
+
+impl PathBufExt for PathBuf {
+    fn into_string_ext(self) -> result::Result<String, Self> {
+        self.into_os_string().into_string().map_err(PathBuf::from)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ServerId {
     /// Note: this variant is given relative to the servers directory
@@ -84,6 +94,14 @@ pub fn current_relative_server_dir(config: &Config) -> Result<PathBuf> {
         .to_path_buf())
 }
 
+fn try_path_buf_to_string_lossless(path_buf: PathBuf) -> Result<String> {
+    path_buf.into_string_ext().map_err(Error::InvalidServerString)
+}
+
+fn try_path_to_str_lossless(path: &Path) -> Result<&str> {
+    path.to_str().ok_or_else(|| Error::InvalidServerString(path.to_path_buf()))
+}
+
 impl ServerId {
     pub fn from_session(session: String) -> Option<Self> {
         session
@@ -96,10 +114,14 @@ impl ServerId {
         Self::Str(var)
     }
 
+    pub fn from_path(path: PathBuf) -> Self {
+        Self::AbsolutePath(path)
+    }
+
     pub fn try_as_session(&self, config: &Config) -> Result<String> {
         Ok(format!(
             "{}{}",
-            self.try_as_str_relative(config)?
+            self.try_as_string_relative(config)?
                 .as_ref()
                 .replace(MAIN_SEPARATOR, "."),
             session::SUFFIX
@@ -117,25 +139,19 @@ impl ServerId {
         })
     }
 
-    pub fn try_as_str_relative(&self, config: &Config) -> Result<Cow<'_, str>> {
+    pub fn try_as_string_relative(&self, config: &Config) -> Result<Cow<'_, str>> {
         Ok(match self {
             ServerId::Str(server) => {
                 if server == "." {
-                    let dir = current_relative_server_dir(config)?
-                        .into_os_string()
-                        .into_string()
-                        .map_err(|s| Error::InvalidServerString(PathBuf::from(s)))?;
-
-                    Cow::Owned(dir)
+                    Cow::Owned(try_path_buf_to_string_lossless(current_relative_server_dir(config)?)?)
                 } else {
                     Cow::Borrowed(server)
                 }
             }
             ServerId::AbsolutePath(path_buf) => Cow::Borrowed(
-                path_buf
+                try_path_to_str_lossless(path_buf
                     .strip_prefix(config.servers_directory.expand()?)?
-                    .to_str()
-                    .ok_or_else(|| Error::InvalidServerString(path_buf.to_owned()))?,
+                )?
             ),
         })
     }
@@ -154,9 +170,7 @@ impl ServerId {
                 .map_err(|s| Error::InvalidServerString(PathBuf::from(s)))?,
             ),
             ServerId::AbsolutePath(path_buf) => Cow::Borrowed(
-                path_buf
-                    .to_str()
-                    .ok_or_else(|| Error::InvalidServerString(path_buf.to_owned()))?,
+                try_path_to_str_lossless(path_buf)?,
             ),
         })
     }
@@ -991,7 +1005,7 @@ pub fn get_command(server: &ServerId, config: &Config) -> Result<String> {
         return Err(Error::TemplateDeployed);
     }
 
-    let server_name = server.try_as_str_relative(config)?;
+    let server_name = server.try_as_string_relative(config)?;
     let server_dir_string = server.try_as_str_absolute(config)?;
 
     let server_jar_path = get_server_jar_path_ensured(&server_dir)?
@@ -1059,7 +1073,7 @@ pub fn new_template(server: &ServerId, config: &Config) -> Result<()> {
         return Err(Error::TemplateUsedForTemplate);
     }
 
-    let server_string = server.try_as_str_relative(config)?;
+    let server_string = server.try_as_string_relative(config)?;
 
     println!("Creating template using server {server_string}...");
 
@@ -1119,7 +1133,7 @@ pub fn from_template(template: &ServerId, server: Option<ServerId>, config: &Con
 
             path.into_owned()
         }
-        None => get_first_server_path(template.try_as_str_relative(config)?.as_ref(), config)?,
+        None => get_first_server_path(template.try_as_string_relative(config)?.as_ref(), config)?,
     };
 
     copy_directory(template_path, server_path)?;

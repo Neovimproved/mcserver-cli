@@ -18,8 +18,8 @@ use crate::error::{Error, ParseConfigError, Result};
 
 const DEFAULT_CONFIG: &str = include_str!(concat!(env!("OUT_DIR"), "/generated_config.kdl"));
 
-const CONFIG_DIRECTORY_NAME: &str = "mcserver";
-const CONFIG_FILE_NAME: &str = "config.kdl";
+pub const CONFIG_DIRECTORY_NAME: &str = "mcserver";
+pub const CONFIG_FILE_NAME: &str = "config.kdl";
 
 pub struct Password(pub String);
 
@@ -444,6 +444,14 @@ pub fn write_document_to_config_file(
     let config_file_path = config_directory.join(CONFIG_FILE_NAME);
 
     fs::write(config_file_path, document.to_string())
+}
+
+pub fn load(config_file_path: impl AsRef<Path>) -> Result<(Config, KdlDocument)> {
+    let config_str = fs::read_to_string(&config_file_path)?;
+    let document = KdlDocument::parse(&config_str)?;
+    let config = parse_config(&document)?;
+
+    Ok((config, document))
 }
 
 pub fn load_or_create(config_directory: &Path) -> Result<(Config, KdlDocument)> {

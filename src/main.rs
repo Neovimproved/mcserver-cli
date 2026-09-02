@@ -6,14 +6,15 @@ mod server;
 mod session;
 
 use clap::{CommandFactory, Parser};
-use clap_complete::generate;
+use clap_complete::{CompleteEnv, generate};
 use color_eyre::eyre::{Result, WrapErr};
 
 use cli::*;
-
-use crate::server::ServerOptionExt;
+use server::ServerOptionExt;
 
 fn main() -> Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
+
     color_eyre::install()?;
 
     let args = Cli::parse();
@@ -33,7 +34,7 @@ fn main() -> Result<()> {
             };
 
             if let Some(server) = server {
-                let server = server.try_as_str_relative(&config)?;
+                let server = server.try_as_string_relative(&config)?;
                 config::add_alias(&mut document, &alias, &server)?;
                 config::write_document_to_config_file(&document, &config_dir)?;
                 println!("Alias `{alias}` now references `{server}`");
@@ -106,7 +107,7 @@ fn main() -> Result<()> {
         Command::Rcon { server, commands } => server::rcon(
             &server
                 .try_unwrap_or_fallback(&config)?
-                .try_as_str_relative(&config)?,
+                .try_as_string_relative(&config)?,
             commands,
             &config,
         )
@@ -126,7 +127,7 @@ fn main() -> Result<()> {
         Command::Restart => server::restart(&config).wrap_err("Failed to restart server")?,
         Command::Stop { server } => {
             let server = server.try_unwrap_or_fallback(&config)?;
-            let server_string = server.try_as_str_relative(&config)?;
+            let server_string = server.try_as_string_relative(&config)?;
 
             server::rcon(&server_string, vec!["stop"], &config)
                 .wrap_err_with(|| format!("Failed to stop server {}", server_string))?;
@@ -137,7 +138,7 @@ fn main() -> Result<()> {
                     format!(
                         "Failed to create template with server {}",
                         server
-                            .try_as_str_relative(&config)
+                            .try_as_string_relative(&config)
                             .as_deref()
                             .unwrap_or("unknown")
                     )
@@ -147,7 +148,7 @@ fn main() -> Result<()> {
                     format!(
                         "Failed to use template {}",
                         template
-                            .try_as_str_relative(&config)
+                            .try_as_string_relative(&config)
                             .as_deref()
                             .unwrap_or("unknown")
                     )
