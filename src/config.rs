@@ -49,10 +49,16 @@ pub struct ServersDirectory {
 
 impl Debug for ServersDirectory {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("raw_string", &self.raw_string)
-            .field("expanded", unsafe { &*self.expanded.get() })
-            .finish()
+        let full_name = type_name::<Self>();
+
+        f.debug_struct(if let Some(pos) = full_name.rfind(":") {
+            &full_name[pos + 1..]
+        } else {
+            full_name
+        })
+        .field("raw_string", &self.raw_string)
+        .field("expanded", unsafe { &*self.expanded.get() })
+        .finish()
     }
 }
 
