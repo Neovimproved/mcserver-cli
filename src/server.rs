@@ -43,16 +43,6 @@ pub const LAST_USED_FILE: &str = "last_used.timestamp";
 const MULTIPLEXER_SESSION_NAME_VAR: &str = "ZELLIJ_SESSION_NAME";
 const SERVER_NAME_VAR: &str = "SERVER_NAME";
 
-trait PathBufExt {
-    fn into_string_ext(self) -> result::Result<String, Self> where Self: Sized;
-}
-
-impl PathBufExt for PathBuf {
-    fn into_string_ext(self) -> result::Result<String, Self> {
-        self.into_os_string().into_string().map_err(PathBuf::from)
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum ServerId {
     /// Note: this variant is given relative to the servers directory
@@ -95,11 +85,12 @@ pub fn current_relative_server_dir(config: &Config) -> Result<PathBuf> {
 }
 
 fn try_path_buf_to_string_lossless(path_buf: PathBuf) -> Result<String> {
-    path_buf.into_string_ext().map_err(Error::InvalidServerString)
+    path_buf.into_string().map_err(Error::InvalidServerString)
 }
 
 fn try_path_to_str_lossless(path: &Path) -> Result<&str> {
-    path.to_str().ok_or_else(|| Error::InvalidServerString(path.to_path_buf()))
+    path.to_str()
+        .ok_or_else(|| Error::InvalidServerString(path.to_path_buf()))
 }
 
 impl ServerId {
@@ -143,16 +134,16 @@ impl ServerId {
         Ok(match self {
             ServerId::Str(server) => {
                 if server == "." {
-                    Cow::Owned(try_path_buf_to_string_lossless(current_relative_server_dir(config)?)?)
+                    Cow::Owned(try_path_buf_to_string_lossless(
+                        current_relative_server_dir(config)?,
+                    )?)
                 } else {
                     Cow::Borrowed(server)
                 }
             }
-            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(
-                try_path_to_str_lossless(path_buf
-                    .strip_prefix(config.servers_directory.expand()?)?
-                )?
-            ),
+            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(try_path_to_str_lossless(
+                path_buf.strip_prefix(config.servers_directory.expand()?)?,
+            )?),
         })
     }
 
@@ -169,9 +160,7 @@ impl ServerId {
                 .into_string()
                 .map_err(|s| Error::InvalidServerString(PathBuf::from(s)))?,
             ),
-            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(
-                try_path_to_str_lossless(path_buf)?,
-            ),
+            ServerId::AbsolutePath(path_buf) => Cow::Borrowed(try_path_to_str_lossless(path_buf)?),
         })
     }
 }
